@@ -1,0 +1,12 @@
+# Base de datos local (se crea al iniciar el servidor; datos de ejemplo con seed_demo.py)
+turnos.db
+turnos.db-journal
+
+# Logs
+*.log
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/

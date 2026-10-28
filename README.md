@@ -37,6 +37,37 @@ Un fork crea una copia del repositorio en tu propia cuenta de GitHub. Es útil s
    git remote -v
    ```
 
+## Cómo ejecutar el backend (Fase 2)
+
+Requiere **Python 3.9 o superior**. Todos los comandos se ejecutan desde la carpeta del repositorio (la que contiene `main.py`).
+
+1. Creá y activá un entorno virtual (recomendado, para no mezclar dependencias con otros proyectos):
+
+   ```bash
+   python -m venv .venv
+   ```
+
+   - Windows (PowerShell): `.venv\Scripts\Activate.ps1`
+   - macOS / Linux: `source .venv/bin/activate`
+
+2. Instalá las dependencias:
+
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+3. Levantá el servidor (la base `turnos.db` se crea sola al iniciar):
+
+   ```bash
+   uvicorn main:app --reload --port 8000
+   ```
+
+4. Probá la API en Swagger UI: http://localhost:8000/docs
+5. (Opcional) Cargá turnos de ejemplo: `python seed_demo.py --reset`
+6. Abrí `prototipo-turnos.html` en el navegador. Con el servidor corriendo, los turnos se leen y se guardan en SQLite.
+
+Si PowerShell bloquea la activación del entorno, ejecutá una vez `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`.
+
 ## Qué es
 
 Una aplicación web para reservar turnos con profesionales. Tiene dos vistas sobre los mismos datos en memoria:

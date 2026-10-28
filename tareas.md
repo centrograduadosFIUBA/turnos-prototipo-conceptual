@@ -150,3 +150,40 @@ F0 Preparación → F1 Dominio → F2 Estado → F3 UI compartida → F4 Cliente
 ```
 
 F4 y F5 pueden avanzar en paralelo una vez cerrada la Fase 3, porque ambas consumen el mismo `store` y no se tocan entre sí.
+
+
+---
+---
+
+# Bloque B — Fase 2 del curso: backend desacoplado (plan.md v2)
+
+> Las fases 0 a 8 de arriba corresponden al prototipo en memoria (Fase 1 del curso). Este bloque ejecuta [plan.md](plan.md) v2 sobre [spec.md](spec.md) v0.2.1. Fuente de verdad: el spec (esquema de la §4, errores de la §7, contrato de la §11).
+
+## Fase B1 — Esquema y semilla (SQLite)
+
+- [x] B1.1 Tablas `usuario`, `servicio` y `turno` con las columnas exactas de la §4.1, creadas automáticamente al iniciar el servidor.
+- [x] B1.2 Datos semilla (solo si la base está vacía): 7 usuarios, 6 servicios tomados de `index.html`. Sin turnos: los crea la API.
+- [x] B1.3 `password_hash` con marcador no utilizable, porque F-01 (login) no está en esta fase (D-06).
+
+## Fase B2 — Backend FastAPI (`main.py`)
+
+- [x] B2.1 FastAPI con CORS permisivo (`allow_origins=["*"]`).
+- [x] B2.2 `GET /api/turnos` con filtros opcionales (spec §11.1).
+- [x] B2.3 `POST /api/turnos`: valida con Pydantic; aplica INV-02 (profesional y cliente), RN-03 y RN-04 dentro de `BEGIN IMMEDIATE`; `fin` y `profesional_id` calculados (spec §11.2).
+- [x] B2.4 `POST /api/turnos/{id}/cancelar`: aplica INV-01 y RN-06; exige motivo si cancela PROFESIONAL/ADMIN; 404 para turno ajeno de un CLIENTE (spec §11.3, RBAC-02).
+- [x] B2.5 Errores con cuerpo `{"error": CODIGO, "detalle": texto}` usando el catálogo de la §7.
+- [ ] B2.6 Revisión humana de `main.py` contra el spec.
+
+**Fuera de esta fase (documentado):** horario laboral (RN-04 parcial), bloqueos (RN-05), auditoría (RN-08), emails (F-13) y vista Administrador; ver spec §9 y plan §5.
+
+## Fase B3 — Verificación
+
+- [ ] B3.1 Criterios 1, 2, 3 del spec §8 contra la API (doble reserva, concurrencia, contigüidad).
+- [ ] B3.2 Criterios 4, 5, 11 (cancelación en ventana, a 1 h 59 min, contrato REST).
+- [x] B3.3 Criterio 9: reiniciar el servidor conserva los turnos (INV-03).
+- [ ] B3.4 Probar en Swagger UI (`/docs`).
+
+## Fase B4 — Frontend conectado
+
+- [x] B4.1 `prototipo-turnos.html` consume la API con `fetch` (plan §2): `cargarTurnos()` (GET), reserva (POST) y cancelación (POST `/cancelar`); errores 409 mostrados con el motivo del backend. _(Verificado: tras F5 los turnos persisten.)_
+- [ ] B4.2 Pendiente (en el frontend esas acciones responden `BACKEND_PENDIENTE`: completar, ausente, cancelar por bloqueo): endpoints de la vista Administrador (requiere ampliar el spec).
