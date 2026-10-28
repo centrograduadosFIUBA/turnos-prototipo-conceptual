@@ -180,10 +180,10 @@ F4 y F5 pueden avanzar en paralelo una vez cerrada la Fase 3, porque ambas consu
 
 - [ ] B3.1 Criterios 1, 2, 3 del spec §8 contra la API (doble reserva, concurrencia, contigüidad).
 - [ ] B3.2 Criterios 4, 5, 11 (cancelación en ventana, a 1 h 59 min, contrato REST).
-- [ ] B3.3 Criterio 9: reiniciar el servidor conserva los turnos (INV-03).
+- [x] B3.3 Criterio 9: reiniciar el servidor conserva los turnos (INV-03).
 - [ ] B3.4 Probar en Swagger UI (`/docs`).
 
 ## Fase B4 — Frontend conectado
 
-- [ ] B4.1 `prototipo-turnos.html` consume la API con `fetch` (plan §2).
-- [ ] B4.2 Pendiente: endpoints de la vista Administrador (requiere ampliar el spec).
+- [x] B4.1 `prototipo-turnos.html` consume la API con `fetch` (plan §2): `cargarTurnos()` (GET), reserva (POST) y cancelación (POST `/cancelar`); errores 409 mostrados con el motivo del backend. _(Verificado: tras F5 los turnos persisten.)_
+- [ ] B4.2 Pendiente (en el frontend esas acciones responden `BACKEND_PENDIENTE`: completar, ausente, cancelar por bloqueo): endpoints de la vista Administrador (requiere ampliar el spec).
