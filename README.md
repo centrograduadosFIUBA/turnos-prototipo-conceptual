@@ -203,3 +203,7 @@ Abrí [index.html](index.html) y seguí [guia-de-uso.md](guia-de-uso.md). Tres p
 ## Tecnologías
 
 HTML, React 18 y Tailwind CSS cargados por CDN, con íconos de Lucide incluidos en el mismo archivo. No hay compilación ni dependencias locales.
+
+---
+
+Última actualización: 27 de octubre de 2026.
