@@ -214,7 +214,7 @@ Mismo orden que [plan.md §6](plan.md). Fuente de verdad: [spec.md](spec.md) v2.
 ## Fase B7 — Prueba de punta a punta y documentación
 
 - [x] B7.1 Backend en `:8000` y frontend en `:5500`: reservar, recargar y reiniciar el backend (el turno sigue), cancelar, error de ventana (`409`) y aviso sin conexión.
-- [ ] B7.2 Reservar el mismo slot desde dos navegadores distintos (plan §5, prueba manual).
+- [x] B7.2 Reservar el mismo slot desde dos navegadores distintos (plan §5, prueba manual). _(2026-11-04: el primer cliente obtiene el turno; el segundo, con la vista sin recargar, recibe `409 SLOT_UNAVAILABLE`. En SQLite queda un solo turno y ningún solape.)_
 - [x] B7.3 README con cómo correr backend, frontend y tests.
 - [ ] B7.4 Completar la columna "Código" de la trazabilidad de spec §10 (requiere una versión nueva de la spec).
 
