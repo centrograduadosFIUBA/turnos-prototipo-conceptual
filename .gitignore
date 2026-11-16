@@ -1,11 +1,75 @@
-backend/.venv/
-venv/
+# =========================================================
+# Sistema de Turnos — .gitignore
+# =========================================================
+
+# --- Entornos virtuales ---
 .venv/
-backend/turnos.db
-backend/turnos.db-wal
-backend/turnos.db-shm
-*.db
+venv/
+env/
+ENV/
+backend/.venv/
+
+# --- Bytecode y cachés de Python ---
 __pycache__/
+*.py[cod]
+*$py.class
+
+# --- Pruebas y cobertura ---
 .pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+.tox/
+.nox/
+
+# --- Herramientas de calidad / tipado ---
+.mypy_cache/
+.ruff_cache/
+.pyright/
+
+# --- Empaquetado ---
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# --- Base de datos local (se regenera al arrancar el backend) ---
+*.db
+*.db-wal
+*.db-shm
+*.sqlite3
+
+# --- Secretos y configuración local ---
 .env
 .env.*
+!.env.example
+
+# --- Logs y temporales ---
+*.log
+*.tmp
+*.bak
+*.swp
+*~
+
+# --- Sistema operativo ---
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+# Linux
+.directory
+.Trash-*
+
+# --- Editores / IDEs ---
+.idea/
+*.code-workspace
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
