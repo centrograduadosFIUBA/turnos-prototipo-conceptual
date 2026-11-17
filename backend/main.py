@@ -15,7 +15,7 @@ from typing import Annotated, Any
 from fastapi import Depends, FastAPI, Header, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 
 import config
 import db
@@ -89,6 +89,13 @@ def actor(conn: Conexion, x_usuario_id: Annotated[str | None, Header()] = None) 
 
 
 Actor = Annotated[sqlite3.Row, Depends(actor)]
+
+
+# ---------------------------------------------------------------- raíz (conveniencia, fuera del contrato §11)
+@app.get("/", include_in_schema=False)
+def raiz() -> RedirectResponse:
+    """Abrir http://localhost:8000/ lleva a la documentación interactiva de la API."""
+    return RedirectResponse(url="/docs")
 
 
 # ---------------------------------------------------------------- §11.3 – §11.5
