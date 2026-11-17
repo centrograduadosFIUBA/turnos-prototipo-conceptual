@@ -199,7 +199,17 @@ Abrí [index.html](index.html) y seguí [guia-de-uso.md](guia-de-uso.md). Tres p
 
 La Fase 2 separa el sistema en tres capas ([plan.md §3](plan.md)): el navegador solo presenta, el backend decide y la base de datos recuerda. Los turnos se guardan en `backend/turnos.db` y sobreviven a recargar la página y a reiniciar el servidor (INV-03).
 
-Necesitás **Python 3.11 o superior**. Abrí dos terminales en la carpeta del proyecto.
+Necesitás **Python 3.11 o superior**.
+
+**Atajo — los dos servidores con un solo comando.** Con el entorno ya creado (paso de la Terminal 1), desde la raíz del proyecto:
+
+```bash
+python iniciar.py            # agregá --abrir para que abra la app en el navegador
+```
+
+Levanta el backend (8000, con `--reload`) y el frontend (5500) como procesos separados, usando siempre el Python de `backend/.venv`. Ctrl+C detiene ambos. Si alguno de los puertos ya está en uso, avisa y no arranca nada.
+
+Para hacerlo a mano, abrí dos terminales en la carpeta del proyecto.
 
 **Terminal 1 — Backend (puerto 8000).** La primera vez, creá el entorno e instalá las dependencias:
 
