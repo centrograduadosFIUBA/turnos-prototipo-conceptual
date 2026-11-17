@@ -294,6 +294,18 @@ Pedido: dejar el repositorio y el entorno listos para los tests automatizados. N
 - [x] B13.6 Suite completa en verde con el entorno nuevo: 140 pruebas, sin advertencias de deprecación.
 - [x] B13.7 Arranque y cierre con Ctrl+C verificados desde la terminal del usuario: puertos 8000 y 5500 libres, sin procesos huérfanos.
 
+## Fase B14 — Matriz de tests automatizados ([spec.md](spec.md) v2.3.0 §13)
+
+- [x] B14.1 `backend/tests/test_turnos.py` con base SQLite aislada: plantilla sembrada una vez por módulo y copia propia por test; `config.DB_PATH` apunta a la copia y el `TestClient` no ejecuta el `lifespan` (TST-01).
+- [x] B14.2 Guarda de `backend/turnos.db`: huella SHA-256 antes y después del módulo (TST-01).
+- [x] B14.3 Test 1 — reserva válida para mañana: `201`, visible en `GET /api/turnos` desde otro cliente HTTP y escrita en el archivo (INV-03).
+- [x] B14.4 Test 2 — mismo horario y profesional: `409 SLOT_UNAVAILABLE`, sin persistir nada (INV-02).
+- [x] B14.5 Test 3 — cancelación a 5 h: `200 CANCELADO` (INV-01).
+- [x] B14.6 Test 4 — cancelación a 45 min: `409 CANCELLATION_WINDOW_EXPIRED` y el turno sigue `CONFIRMADO` (INV-01). _(Hecho con variación: RN-04 impide crear un turno a 45 min; se crea a 5 h y se adelanta el reloj.)_
+- [x] B14.7 Test 5 — cuerpo inválido en 5 variantes: `422 VALIDATION_ERROR`, sin persistir nada. _(Hecho con variación: el pedido aceptaba 400; la spec fija 422.)_
+- [x] B14.8 Módulo en 1,16 s según pytest (TST-03); suite completa en verde: 149 pruebas.
+- [x] B14.9 spec.md v2.3.0: §13 Matriz de Tests Automatizados y entrada en el historial de cambios.
+
 ## Pendientes fuera de v2.1.0
 
 - [ ] Endpoint de usuarios (hoy la lista sigue local en el frontend).

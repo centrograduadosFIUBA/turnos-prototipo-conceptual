@@ -2,8 +2,8 @@
 
 | Campo | Valor |
 |---|---|
-| Versión | 2.2.0 (Fase 2 — Arquitectura en tres capas explícita) |
-| Versión anterior | 2.1.0 (contrato ampliado); 2.0.0 (contrato de turnos); 0.1.0 (MVP, Fase 1 — prototipo en memoria) |
+| Versión | 2.3.0 (Clase 5 — Matriz de tests automatizados) |
+| Versión anterior | 2.2.0 (arquitectura en tres capas); 2.1.0 (contrato ampliado); 2.0.0 (contrato de turnos); 0.1.0 (MVP, Fase 1 — prototipo en memoria) |
 | Estado | Borrador para revisión |
 | Metodología | Spec-Driven Development (SDD) |
 | Fecha | 2026-11-03 |
@@ -11,6 +11,13 @@
 > Este documento es el **contrato del sistema**. Todo código, test y decisión de diseño debe poder trazarse a una sección de este archivo. Si el código y la spec divergen, se corrige primero la spec y luego el código.
 
 Palabras clave normativas: **DEBE** (obligatorio), **NO DEBE** (prohibido), **PUEDE** (opcional), según RFC 2119.
+
+### Cambios de la versión 2.3.0
+
+| Sección | Cambio |
+|---|---|
+| §3, §4, §11, §12 | **Sin cambios.** Reglas, modelo de datos, contrato REST y arquitectura quedan idénticos. |
+| §13 | **Nuevo:** matriz de tests automatizados (5 escenarios sobre INV-01, INV-02, INV-03 y validación del cuerpo) y condiciones de ejecución TST-01 a TST-03. |
 
 ### Cambios de la versión 2.2.0
 
@@ -774,3 +781,35 @@ La presentación PUEDE repetir una regla solo como ayuda visual (por ejemplo, av
 - **ARQ-07 — Errores por capas.** La presentación conoce solo `error.codigo` y `error.mensaje` (§11.1). El negocio traduce los errores de la base a códigos de la §7, y cualquier otro fallo de la base a `503 PERSISTENCE_UNAVAILABLE`, siempre después del `ROLLBACK` (INV-03).
 
 **Excepción documentada:** `seed.py` pertenece a la capa de datos pero usa `domain.dentro_de_horario` para que la semilla respete RN-04. Es una herramienta de arranque, no un camino de solicitudes, y no habilita a otros módulos de datos a depender del negocio.
+
+---
+
+## 13. Matriz de Tests Automatizados (v2.3.0)
+
+Suite mínima de regresión de las invariantes, ejecutada vía HTTP contra la app FastAPI con `pytest`. Archivo: `backend/tests/test_turnos.py`. Complementa, sin reemplazarlos, los criterios de la §8 (cubiertos por el resto de `backend/tests/`).
+
+```bash
+cd backend
+.venv/Scripts/python -m pytest tests/test_turnos.py
+```
+
+### 13.1 Condiciones de ejecución
+
+- **TST-01 — Base aislada.** Cada test DEBE correr sobre su propia copia de una base SQLite temporal, con el esquema de la §4.1 y la semilla. La suite NO DEBE leer ni escribir `backend/turnos.db`: una fixture compara su huella SHA-256 antes y después y falla si cambió.
+- **TST-02 — Reloj fijo.** `reloj.ahora()` se reemplaza por un reloj controlable fijado en el miércoles 2026-11-04 10:00 (UTC-3). Los horarios de cada escenario se calculan a partir de ese instante, por lo que el resultado no depende del día ni de la hora en que se ejecuta.
+- **TST-03 — Duración.** El módulo DEBE completarse en menos de 2 s según el tiempo que informa `pytest`, sin contar el arranque del intérprete.
+
+### 13.2 Escenarios
+
+| # | Regla | Escenario (Dado / Cuando) | Resultado esperado | Test |
+|---|---|---|---|---|
+| 1 | Camino feliz, INV-03 | Un cliente reserva un turno válido para mañana a las 12:00. | `201` con `estado = CONFIRMADO` y `Location`. Otro cliente HTTP lo obtiene idéntico en `GET /api/turnos`, y el turno está escrito en el archivo SQLite. | `test_1_reserva_valida_para_manana_aparece_al_listar` |
+| 2 | INV-02 (RN-02) | Ya existe un turno mañana a las 12:00 con el mismo profesional; otro cliente pide el mismo horario. | `409 SLOT_UNAVAILABLE`. No se persiste ningún turno nuevo y la agenda del profesional muestra solo el primero. | `test_2_mismo_horario_rechaza_la_segunda_reserva` |
+| 3 | INV-01 (RN-01) | El cliente cancela un turno propio que empieza dentro de 5 h. | `200` con `estado = CANCELADO` y `cancelado_por_id` = el cliente. | `test_3_cancelar_con_5_horas_de_anticipacion` |
+| 4 | INV-01 (RN-01) | El cliente intenta cancelar un turno propio cuando faltan 45 min para su inicio. | `409 CANCELLATION_WINDOW_EXPIRED`. El turno sigue `CONFIRMADO`. | `test_4_cancelar_a_45_minutos_del_inicio_es_rechazado` |
+| 5 | §11.4, cuerpo mal formado | `POST /api/turnos` con cuerpo vacío, sin `servicio_id`, sin `inicio`, con `servicio_id` numérico o con `inicio` que no es fecha (5 variantes). | `422 VALIDATION_ERROR` en todas. No se persiste ningún turno. | `test_5_cuerpo_invalido_es_rechazado_por_pydantic` |
+
+### 13.3 Notas
+
+- **Escenario 4:** RN-04 exige 1 h de antelación para reservar, así que un turno a 45 min no se puede crear por la API. El test lo crea a 5 h y adelanta el reloj del servidor hasta que faltan 45 min, que es la situación que la regla describe.
+- **Códigos HTTP:** donde un pedido admite "400 o 409" o "400 o 422", el test exige el código exacto de la §7 y la §11: `409` para INV-01 e INV-02 y `422` para la validación del cuerpo. No se usa `400`.
