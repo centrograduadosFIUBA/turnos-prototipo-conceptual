@@ -2,8 +2,8 @@
 
 | Campo | Valor |
 |---|---|
-| Versión | 2.3.1 (Clase 5 — Matriz de tests automatizados y casos de borde) |
-| Versión anterior | 2.3.0 (matriz de tests); 2.2.0 (arquitectura en tres capas); 2.1.0 (contrato ampliado); 2.0.0 (contrato de turnos); 0.1.0 (MVP, Fase 1 — prototipo en memoria) |
+| Versión | 2.3.2 (Clase 5 — Matriz de tests, casos de borde e integración con el frontend) |
+| Versión anterior | 2.3.1 (casos de borde); 2.3.0 (matriz de tests); 2.2.0 (arquitectura en tres capas); 2.1.0 (contrato ampliado); 2.0.0 (contrato de turnos); 0.1.0 (MVP, Fase 1 — prototipo en memoria) |
 | Estado | Borrador para revisión |
 | Metodología | Spec-Driven Development (SDD) |
 | Fecha | 2026-11-03 |
@@ -11,6 +11,13 @@
 > Este documento es el **contrato del sistema**. Todo código, test y decisión de diseño debe poder trazarse a una sección de este archivo. Si el código y la spec divergen, se corrige primero la spec y luego el código.
 
 Palabras clave normativas: **DEBE** (obligatorio), **NO DEBE** (prohibido), **PUEDE** (opcional), según RFC 2119.
+
+### Cambios de la versión 2.3.2
+
+| Sección | Cambio |
+|---|---|
+| §3, §4, §11, §12 | **Sin cambios.** |
+| §13.4 | **Nuevo:** tests de integración entre `prototipo-turnos.html` y el contrato del backend (ARQ-01). |
 
 ### Cambios de la versión 2.3.1
 
@@ -791,7 +798,7 @@ La presentación PUEDE repetir una regla solo como ayuda visual (por ejemplo, av
 
 ---
 
-## 13. Matriz de Tests Automatizados (v2.3.1)
+## 13. Matriz de Tests Automatizados (v2.3.2)
 
 Suite mínima de regresión de las invariantes, ejecutada vía HTTP contra la app FastAPI con `pytest`. Archivo: `backend/tests/test_turnos.py`. Complementa, sin reemplazarlos, los criterios de la §8 (cubiertos por el resto de `backend/tests/`).
 
@@ -824,3 +831,18 @@ cd backend
 - **Escenario 4:** RN-04 exige 1 h de antelación para reservar, así que un turno a 45 min no se puede crear por la API. El test lo crea a 5 h y adelanta el reloj del servidor hasta que faltan 45 min, que es la situación que la regla describe.
 - **Códigos HTTP:** donde un pedido admite "400 o 409" o "400 o 422", el test exige el código exacto de la §7 y la §11: `409` para INV-01, INV-02 y la doble cancelación, y `422` para la validación del cuerpo. No se usa `400`.
 - **Escenario 7:** un turno ajeno también responde `404` y no `403`, para no revelar que existe (RBAC-02).
+
+### 13.4 Integración con el frontend (ARQ-01)
+
+Archivo: `backend/tests/test_integracion_frontend.py`. Lee `prototipo-turnos.html` del repositorio y lo compara con el contrato que expone la app (`app.openapi()`). No necesita navegador ni servidores levantados.
+
+| # | Qué verifica | Falla si… |
+|---|---|---|
+| I-1 | `API_BASE` es `http://localhost:8000`; el origen `:5500` y los encabezados `Content-Type` y `X-Usuario-Id` están en la lista CORS. | Cambia el puerto de un lado, o el backend deja de aceptar el origen o un encabezado. |
+| I-2 | Las llamadas del objeto `Api` y las rutas del contrato son el mismo conjunto (método + ruta). | El frontend llama a una ruta que no existe, o el backend expone una que el frontend no usa. |
+| I-3 | Por cada llamada: los parámetros de consulta y las claves del cuerpo existen en el contrato, y no falta ningún parámetro obligatorio. | El frontend envía un campo que el backend rechazaría con `422 VALIDATION_ERROR`. |
+| I-4 | Los UUID escritos en el HTML son `seed.uid(clave)`; la lista local `USERS` coincide con `seed.USUARIOS`; `CONFIG` coincide con `config.py`. | Cambia la semilla o una regla (por ejemplo, la ventana de 2 h) de un solo lado. |
+| I-5 | Preflight CORS de cada llamada desde `:5500` con `Content-Type` y `X-Usuario-Id`. | El navegador bloquearía la llamada. |
+| I-6 | Reserva y cancelación con los encabezados y cuerpos exactos del frontend (`{}` sin motivo), y `POST` sin cuerpo con `Content-Type: application/json`. | El backend rechaza un pedido tal como lo arma el navegador. |
+
+Las filas I-1 a I-5 se validaron introduciendo una rotura de ejemplo y comprobando que el test falla: ruta renombrada, clave del cuerpo y parámetro de consulta cambiados, UUID alterado, ventana de cancelación distinta y `X-Usuario-Id` fuera de la lista CORS.

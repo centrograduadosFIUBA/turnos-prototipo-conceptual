@@ -320,6 +320,14 @@ Estado de los hitos de la Clase 5: entorno virtual ✅ (B13.1 a B13.3), suite de
 - [x] B15.8 Módulo `test_turnos.py` con 18 casos en 1,67 s (TST-03); suite completa en verde: 158 pruebas, sin advertencias de deprecación.
 - [x] B15.9 spec.md v2.3.1: escenarios 6 a 8 en la §13 y entrada en el historial de cambios. Versión de la app en Swagger alineada (2.3.1).
 
+## Fase B16 — Integración frontend ↔ backend ([spec.md](spec.md) v2.3.2 §13.4)
+
+- [x] B16.1 Prueba en vivo con `iniciar.py` sobre una base temporal (`TURNOS_DB`): las 16 operaciones que usa `prototipo-turnos.html` responden por HTTP real, con preflight CORS desde `:5500`. `backend/turnos.db` no se tocó.
+- [x] B16.2 `backend/tests/test_integracion_frontend.py`: lee el HTML y lo compara con `app.openapi()` (I-1 a I-6): `API_BASE` y CORS, rutas del objeto `Api` contra el contrato, parámetros y claves de los cuerpos, UUID, usuarios y `CONFIG` contra `seed.py` y `config.py`, preflight de cada llamada y pedidos con los cuerpos exactos del navegador.
+- [x] B16.3 Validación de los tests con roturas de ejemplo (ruta, clave del cuerpo, parámetro, UUID, ventana de 2 h, CORS sin `X-Usuario-Id`): cada una hace fallar el test que corresponde.
+- [x] B16.4 39 casos en 1,1 s; suite completa en verde: 197 pruebas, sin advertencias de deprecación.
+- [ ] B16.5 Prueba en un navegador real (renderizado de React, flujos de la UI): queda manual; los tests cubren el contrato entre capas, no la interfaz.
+
 ## Pendientes fuera de v2.1.0
 
 - [ ] Endpoint de usuarios (hoy la lista sigue local en el frontend).

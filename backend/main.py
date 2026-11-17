@@ -60,7 +60,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="Sistema de Turnos",
-    version="2.3.1",
+    version="2.3.2",
     description=DESCRIPCION_API,
     openapi_tags=ETIQUETAS,
     lifespan=lifespan,
