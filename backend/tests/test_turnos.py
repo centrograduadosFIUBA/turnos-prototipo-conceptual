@@ -1,4 +1,4 @@
-"""Matriz de Tests Automatizados (spec.md §13): INV-01, INV-02, INV-03 y validación del cuerpo, vía HTTP.
+"""Matriz de Tests Automatizados (spec.md §13): INV-01, INV-02, INV-03, validación del cuerpo y casos de borde, vía HTTP.
 
 Aislamiento de la base:
 - La semilla se construye UNA vez por módulo en un directorio temporal (`plantilla`).
@@ -164,3 +164,44 @@ def test_5_cuerpo_invalido_es_rechazado_por_pydantic(api, cuerpo):
 
     assert r.status_code == 422 and codigo(r) == "VALIDATION_ERROR"
     assert contar_turnos() == antes
+
+
+# ---------------------------------------------------------------- Test 6 · textos vacíos o en blanco
+@pytest.mark.parametrize("cuerpo", [
+    pytest.param({"servicio_id": "", "inicio": MANANA}, id="servicio_id-vacio"),
+    pytest.param({"servicio_id": "   ", "inicio": MANANA}, id="servicio_id-espacios"),
+    pytest.param({"servicio_id": uid("s5"), "inicio": ""}, id="inicio-vacio"),
+    pytest.param({"servicio_id": uid("s5"), "inicio": "   "}, id="inicio-espacios"),
+    pytest.param({"servicio_id": uid("s5"), "inicio": MANANA, "cliente_id": " "}, id="cliente_id-espacio"),
+])
+def test_6_textos_vacios_o_en_blanco_no_crean_turnos(api, cuerpo):
+    antes = contar_turnos()
+
+    r = api.post("/api/turnos", json=cuerpo, headers=como("c1"))
+
+    assert r.status_code == 422 and codigo(r) == "VALIDATION_ERROR"
+    assert contar_turnos() == antes
+
+
+# ---------------------------------------------------------------- Test 7 · cancelar un turno inexistente
+@pytest.mark.parametrize("quien,turno_id", [
+    pytest.param("c1", uid("t-inexistente"), id="cliente-uuid-inexistente"),
+    pytest.param("c1", "no-es-un-id", id="cliente-id-arbitrario"),
+    pytest.param("admin", uid("t-inexistente"), id="admin-uuid-inexistente"),
+])
+def test_7_cancelar_turno_inexistente_devuelve_404(api, quien, turno_id):
+    r = api.post(f"/api/turnos/{turno_id}/cancelar", json={"motivo": "Prueba"}, headers=como(quien))
+
+    assert r.status_code == 404 and codigo(r) == "NOT_FOUND"
+
+
+# ---------------------------------------------------------------- Test 8 · cancelar dos veces
+def test_8_cancelar_un_turno_ya_cancelado_es_rechazado(api):
+    turno = reservar(api, "c1", "s1", EN_5_HORAS).json()
+    primera = cancelar(api, "c1", turno["id"])
+    assert primera.status_code == 200
+
+    r = cancelar(api, "c1", turno["id"])
+
+    assert r.status_code == 409 and codigo(r) == "INVALID_STATE_TRANSITION"   # RN-06: CANCELADO es terminal
+    assert ver_turno(api, "c1", turno["id"]) == primera.json()               # la segunda no cambió nada

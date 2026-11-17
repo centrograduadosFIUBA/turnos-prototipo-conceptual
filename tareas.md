@@ -306,6 +306,20 @@ Pedido: dejar el repositorio y el entorno listos para los tests automatizados. N
 - [x] B14.8 Módulo en 1,16 s según pytest (TST-03); suite completa en verde: 149 pruebas.
 - [x] B14.9 spec.md v2.3.0: §13 Matriz de Tests Automatizados y entrada en el historial de cambios.
 
+## Fase B15 — Blindaje de endpoints y refactorización de legibilidad ([spec.md](spec.md) v2.3.1)
+
+Estado de los hitos de la Clase 5: entorno virtual ✅ (B13.1 a B13.3), suite de testing ✅ (B14 y B15.1 a B15.4), refactorización de legibilidad del backend ✅ (B15.5 a B15.7). La reorganización en el paquete `app/` (B3.3) es otra tarea y sigue pendiente.
+
+- [x] B15.1 Sondeo previo de los 3 casos de borde: el backend ya respondía según spec §11.4 y §11.5, así que no hizo falta cambiar la lógica, solo protegerla con tests.
+- [x] B15.2 Test 6 — `servicio_id`, `inicio` o `cliente_id` vacíos o solo con espacios: `422 VALIDATION_ERROR`, sin persistir nada.
+- [x] B15.3 Test 7 — cancelar un turno inexistente (UUID válido o id arbitrario, como cliente o admin): `404 NOT_FOUND`.
+- [x] B15.4 Test 8 — cancelar dos veces: `409 INVALID_STATE_TRANSITION` y el turno no cambia (RN-06). _(Hecho con variación: el pedido aceptaba 400 o 409; la spec fija 409.)_
+- [x] B15.5 `main.py`: rutas agrupadas por etiqueta (turnos, catálogo, agenda), `summary` y descripción en cada ruta, descripción general de la API y de las etiquetas en Swagger, encabezado `X-Usuario-Id` documentado, nombres más claros en manejadores de errores y dependencias (`respuesta_de_error`, `manejar_*`, `abrir_conexion`, `actor_obligatorio`).
+- [x] B15.6 `schemas.py`: descripción de los campos de entrada y de los modelos; cada status de error en Swagger indica qué códigos de la §7 agrupa.
+- [x] B15.7 Contrato sin cambios: comparación automática del OpenAPI antes y después (16 operaciones con las mismas rutas, métodos, parámetros, cuerpos, status y modelos).
+- [x] B15.8 Módulo `test_turnos.py` con 18 casos en 1,67 s (TST-03); suite completa en verde: 158 pruebas, sin advertencias de deprecación.
+- [x] B15.9 spec.md v2.3.1: escenarios 6 a 8 en la §13 y entrada en el historial de cambios. Versión de la app en Swagger alineada (2.3.1).
+
 ## Pendientes fuera de v2.1.0
 
 - [ ] Endpoint de usuarios (hoy la lista sigue local en el frontend).

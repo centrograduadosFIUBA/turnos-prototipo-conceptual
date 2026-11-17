@@ -36,15 +36,17 @@ class Estricto(BaseModel):
 
 # ---------------------------------------------------------------- entrada
 class ReservaIn(Estricto):
-    """§11.4. `fin`, `profesional_id` y `estado` los define el servidor."""
-    servicio_id: uuid.UUID = Field(examples=["<uuid de Servicio>"])
-    inicio: InstanteIn = Field(examples=[EJ_INICIO])
+    """Cuerpo de `POST /api/turnos` (§11.4). `fin`, `profesional_id` y `estado` los define el servidor."""
+    servicio_id: uuid.UUID = Field(description="UUID de un servicio activo (RN-07).", examples=["<uuid de Servicio>"])
+    inicio: InstanteIn = Field(description="Comienzo del turno, ISO 8601 UTC con sufijo Z (RN-04).",
+                               examples=[EJ_INICIO])
     cliente_id: uuid.UUID | None = Field(default=None, description="Solo ADMIN: reserva en nombre de un cliente.")
 
 
 class CancelacionIn(Estricto):
-    """§11.5. Obligatorio para PROFESIONAL/ADMIN; opcional para el CLIENTE."""
-    motivo: str | None = Field(default=None, examples=["El profesional no puede asistir."])
+    """Cuerpo opcional de `POST /api/turnos/{id}/cancelar` (§11.5)."""
+    motivo: str | None = Field(default=None, description="Obligatorio para PROFESIONAL y ADMIN; opcional para el CLIENTE.",
+                               examples=["El profesional no puede asistir."])
 
 
 class FranjaIn(Estricto):
@@ -54,18 +56,19 @@ class FranjaIn(Estricto):
 
 
 class HorarioIn(Estricto):
-    """§11.8: reemplaza el horario semanal completo del profesional."""
+    """Cuerpo de `POST /api/horarios` (§11.8): reemplaza el horario semanal completo del profesional."""
     profesional_id: uuid.UUID
     franjas: list[FranjaIn]
 
 
 class BloqueoIn(Estricto):
-    """§11.10."""
+    """Cuerpo de `POST /api/bloqueos` (§11.10, RN-05)."""
     profesional_id: uuid.UUID
     inicio: InstanteIn
     fin: InstanteIn
     motivo: str | None = None
-    confirmar_cancelacion: bool = False
+    confirmar_cancelacion: bool = Field(
+        default=False, description="true: cancela los turnos confirmados que choquen con el bloqueo.")
 
 
 # ---------------------------------------------------------------- salida
@@ -85,6 +88,7 @@ class Turno(Estricto):
 
 
 class Servicio(Estricto):
+    """Servicio del catálogo (§4.1)."""
     id: str
     profesional_id: str
     nombre: str
@@ -95,6 +99,7 @@ class Servicio(Estricto):
 
 
 class HorarioLaboral(Estricto):
+    """Franja semanal de atención de un profesional (§4.1)."""
     id: str
     profesional_id: str
     dia_semana: int
@@ -103,6 +108,7 @@ class HorarioLaboral(Estricto):
 
 
 class Bloqueo(Estricto):
+    """Rango de la agenda sin turnos (§4.1, RN-05)."""
     id: str
     profesional_id: str
     inicio: Instante
@@ -111,11 +117,13 @@ class Bloqueo(Estricto):
 
 
 class BloqueoCreado(Estricto):
+    """Respuesta de `POST /api/bloqueos`: el bloqueo y los turnos que se cancelaron al crearlo."""
     bloqueo: Bloqueo
     turnos_cancelados: list[Turno]
 
 
 class AuditoriaEvento(Estricto):
+    """Evento inmutable del registro de auditoría (§4.1, RN-08)."""
     id: str
     entidad: str
     entidad_id: str
@@ -127,6 +135,7 @@ class AuditoriaEvento(Estricto):
 
 
 class Slot(Estricto):
+    """Horario libre para reservar (§11.9)."""
     inicio: Instante
     fin: Instante
 
@@ -168,6 +177,18 @@ class Error(Estricto):
     error: ErrorCuerpo
 
 
+DESCRIPCION_ERRORES = {
+    401: "UNAUTHENTICATED: falta `X-Usuario-Id` o no corresponde a un usuario activo.",
+    403: "FORBIDDEN o EMAIL_NOT_VERIFIED: el rol del actor no permite la acción.",
+    404: "NOT_FOUND: el recurso no existe o el actor no tiene acceso a él.",
+    409: "Conflicto con una regla de negocio (SLOT_UNAVAILABLE, CANCELLATION_WINDOW_EXPIRED, "
+         "INVALID_STATE_TRANSITION, SERVICE_UNAVAILABLE).",
+    422: "VALIDATION_ERROR (cuerpo o parámetros mal formados) o una regla de datos "
+         "(INVALID_TIME_RANGE, INVALID_CONTACT, REASON_REQUIRED).",
+    503: "PERSISTENCE_UNAVAILABLE: no se pudo acceder a la base; no quedó ninguna escritura parcial.",
+}
+
+
 def errores(*codigos: int) -> dict[int | str, dict]:
-    """Respuestas de error para documentar en Swagger."""
-    return {c: {"model": Error} for c in codigos}
+    """Respuestas de error de una ruta, para Swagger: modelo de la §11.1 y qué códigos de la §7 agrupa cada status."""
+    return {c: {"model": Error, "description": DESCRIPCION_ERRORES[c]} for c in codigos}
