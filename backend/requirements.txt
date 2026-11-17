@@ -3,10 +3,10 @@
 # Instalar con:  .venv/Scripts/python -m pip install -r requirements.txt
 
 # --- Ejecución (API) ---
-fastapi==0.162.0
+fastapi==0.163.1
 uvicorn==0.54.0
-pydantic==2.14.2
+pydantic==2.14.3
 
 # --- Pruebas automatizadas ---
 pytest==9.2.0
-httpx==0.28.1        # requerido por fastapi.testclient.TestClient
+httpx2==2.16.2       # cliente HTTP de fastapi.testclient.TestClient (reemplaza a httpx, deprecado)
