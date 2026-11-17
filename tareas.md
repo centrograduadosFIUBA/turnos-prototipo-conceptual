@@ -280,6 +280,20 @@ Pedido: regenerar `main.py` con CORS, SQLite, tabla `turnos` y los tres endpoint
 
 Si se quiere el modelo del pedido, primero hay que cambiar spec §4.1, §7 y §11 (nueva versión) y después el código.
 
+# Preparación de la Clase 5 — Aislamiento del repositorio y entorno de pruebas
+
+Pedido: dejar el repositorio y el entorno listos para los tests automatizados. No cambia el contrato de spec §11 ni la arquitectura de §12.
+
+## Fase B13 — Dependencias, entorno y arranque
+
+- [x] B13.1 `backend/requirements.txt` con las dependencias de ejecución (`fastapi`, `uvicorn`, `pydantic`) y de pruebas (`pytest`, `httpx2`), en versiones fijas. _(Hecho con variación: el pedido nombraba `httpx`; se usa `httpx2` porque `starlette.testclient` marca `httpx` como deprecado. `fastapi` 0.163.1 y `pydantic` 2.14.3.)_
+- [x] B13.2 `.gitignore` de Python: entornos virtuales, `__pycache__/`, `.pytest_cache/`, cobertura, base SQLite, `.env` y archivos del sistema operativo y de IDEs.
+- [x] B13.3 `backend/.venv` recreado desde cero solo con `requirements.txt`; `pip check` sin conflictos y nada instalado en el Python global.
+- [x] B13.4 `GET /` redirige (307) a `/docs`, con `include_in_schema=False`: no figura en el contrato ni en OpenAPI.
+- [x] B13.5 `iniciar.py` en la raíz: levanta backend (8000, `--reload`) y frontend (5500, solo `127.0.0.1`) como procesos separados con el Python del venv; verifica puertos libres y Ctrl+C cierra ambos con sus hijos. Atajo documentado en el README.
+- [x] B13.6 Suite completa en verde con el entorno nuevo: 140 pruebas, sin advertencias de deprecación.
+- [x] B13.7 Arranque y cierre con Ctrl+C verificados desde la terminal del usuario: puertos 8000 y 5500 libres, sin procesos huérfanos.
+
 ## Pendientes fuera de v2.1.0
 
 - [ ] Endpoint de usuarios (hoy la lista sigue local en el frontend).
