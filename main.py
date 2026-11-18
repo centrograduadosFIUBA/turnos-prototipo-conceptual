@@ -4,6 +4,9 @@ Fuente de verdad: spec.md v0.2.1 (§4 esquema, §7 errores, §11 contrato REST) 
 Reglas hechas cumplir en el servidor: INV-01 (RN-01), INV-02 (RN-02), INV-03 (persistencia atómica),
 RN-03, RN-04 (parcial: ver "Fuera de alcance") y RN-06.
 
+Fase 3 (spec §15): agente asistente `POST /api/chat` (agent.py) y base de conocimiento
+`POST /api/conocimiento` (ingestar_conocimiento.py, ChromaDB). Ambos reutilizan la lógica de este archivo.
+
 Fuera de alcance en esta fase (spec §9, plan §5): horario laboral, bloqueos, auditoría, emails, login.
 
 Organización del archivo:
@@ -15,7 +18,7 @@ Organización del archivo:
     6. Reglas de dominio funciones que operan sobre la conexión de la transacción
     7. API               aplicación FastAPI y endpoints
 
-Levantar:  uvicorn main:app --reload --port 8000      Swagger UI: http://localhost:8000/docs
+Levantar:  uvicorn main:app --reload --port 8001      Swagger UI: http://localhost:8001/docs
 Probar:    python -m pytest
 """
 from __future__ import annotations
@@ -28,9 +31,9 @@ from contextlib import asynccontextmanager, contextmanager
 from datetime import datetime, timedelta, timezone
 from enum import Enum
 from pathlib import Path
-from typing import Annotated, AsyncIterator, Iterator, Optional
+from typing import Annotated, AsyncIterator, Iterator, Literal, Optional
 
-from fastapi import FastAPI, Path as RutaParam, Query, Request
+from fastapi import FastAPI, Path as RutaParam, Query, Request, UploadFile
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
@@ -274,6 +277,41 @@ class ErrorOut(BaseModel):
     detalle: str = Field(description="Explicación legible para mostrar al usuario.")
 
 
+class ChatMensaje(BaseModel):
+    """Un mensaje previo de la conversación (el cliente reenvía el historial en cada pedido, spec D-10)."""
+
+    role: Literal["user", "assistant"]
+    content: str
+
+
+class ChatIn(BaseModel):
+    """Cuerpo de `POST /api/chat`."""
+
+    mensaje: IdTexto = Field(description="Mensaje del usuario en lenguaje natural.", examples=["¿Qué obras sociales aceptan?"])
+    cliente_id: Optional[str] = Field(default=None, description="Paciente de la sesión (provisorio, D-06). El agente solo reserva y cancela para él.", examples=["c1"])
+    historial: list[ChatMensaje] = Field(default_factory=list, description="Mensajes anteriores de la conversación (solo texto).")
+
+
+class ToolUsada(BaseModel):
+    """Auditoría de una herramienta ejecutada por el agente (INV-04)."""
+
+    herramienta: str
+    entrada: dict
+    resultado: dict
+    error: bool
+
+
+class ChatOut(BaseModel):
+    respuesta: str
+    tools_usadas: list[ToolUsada]
+    turnos_modificados: bool = Field(description="`true` si el agente creó o canceló un turno (el frontend refresca la tabla).")
+
+
+class ConocimientoOut(BaseModel):
+    archivo: str
+    chunks: int
+
+
 def fila_a_turno_out(row: sqlite3.Row) -> TurnoOut:
     """Convierte una fila de la tabla `turno` en el esquema de salida."""
     return TurnoOut(**{k: row[k] for k in TurnoOut.model_fields})
@@ -501,3 +539,58 @@ def cancelar_turno(data: CancelarIn, turno_id: str = RutaParam(description="Id d
     """
     with write_tx() as conn:
         return fila_a_turno_out(registrar_cancelacion(conn, turno_id, data, utcnow()))
+
+
+# ----------------------------------------------------------------------------
+# Fase 3 (spec §15): agente asistente y base de conocimiento
+# ----------------------------------------------------------------------------
+@app.post(
+    "/api/chat",
+    response_model=ChatOut,
+    tags=["Agente"],
+    summary="Chatear con el asistente de turnos",
+    responses={
+        422: {"model": ErrorOut, "description": "`INVALID_REQUEST`: cuerpo mal formado o mensaje vacío."},
+        503: {"model": ErrorOut, "description": "`AGENT_UNAVAILABLE`: falta ANTHROPIC_API_KEY o el servicio del modelo no responde."},
+    },
+)
+def chat(data: ChatIn) -> ChatOut:
+    """El agente responde con herramientas reales: consulta y reserva/cancela turnos en SQLite (INV-04) a través
+    de las mismas reglas de la API REST (INV-05) y responde sobre políticas solo con fragmentos de ChromaDB (INV-06).
+    `tools_usadas` lista las herramientas ejecutadas para poder auditarlas."""
+    import anthropic
+
+    import agent  # import diferido: carga .env y evita un import circular con este módulo
+
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        raise DomainError(503, "AGENT_UNAVAILABLE", "El asistente no está configurado: falta ANTHROPIC_API_KEY en el archivo .env.")
+    try:
+        salida = agent.ejecutar_agente(data.mensaje, data.cliente_id, [m.model_dump() for m in data.historial])
+    except anthropic.APIError as exc:
+        raise DomainError(503, "AGENT_UNAVAILABLE", f"El servicio del asistente no respondió ({type(exc).__name__}).")
+    return ChatOut(**salida)
+
+
+@app.post(
+    "/api/conocimiento",
+    response_model=ConocimientoOut,
+    tags=["Agente"],
+    summary="Cargar un documento a la base de conocimiento",
+    responses={422: {"model": ErrorOut, "description": "`INVALID_REQUEST`: archivo ausente, vacío, no UTF-8 o con extensión distinta de `.md`/`.txt`."}},
+)
+def cargar_conocimiento(archivo: UploadFile) -> ConocimientoOut:
+    """Indexa en caliente un `.md` o `.txt` en ChromaDB (sin reiniciar el servidor). Si ya existía un archivo con
+    el mismo nombre, reemplaza sus fragmentos. Queda disponible para el agente en el pedido siguiente (INV-06)."""
+    from ingestar_conocimiento import ingestar_texto
+
+    nombre = Path(archivo.filename or "").name
+    if Path(nombre).suffix.lower() not in (".md", ".txt"):
+        raise DomainError(422, "INVALID_REQUEST", "Solo se aceptan archivos .md o .txt.")
+    try:
+        texto = archivo.file.read().decode("utf-8-sig")
+    except UnicodeDecodeError:
+        raise DomainError(422, "INVALID_REQUEST", "El archivo debe estar codificado en UTF-8.")
+    chunks = ingestar_texto(texto, nombre) if texto.strip() else 0
+    if chunks == 0:
+        raise DomainError(422, "INVALID_REQUEST", "El archivo está vacío.")
+    return ConocimientoOut(archivo=nombre, chunks=chunks)

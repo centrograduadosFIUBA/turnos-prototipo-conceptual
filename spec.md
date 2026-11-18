@@ -2,11 +2,11 @@
 
 | Campo | Valor |
 |---|---|
-| Versión | 0.2.2 (MVP · Fase 2: arquitectura desacoplada) |
+| Versión | 0.3.0 (Fase 3: agente asistente y base de conocimiento) |
 | Estado | Borrador para revisión |
 | Metodología | Spec-Driven Development (SDD) |
-| Fecha | 2026-10-27 |
-| Cambios respecto de 0.1.0 | Ver §11 (Historial de cambios) |
+| Fecha | 2026-11-17 |
+| Cambios respecto de 0.1.0 | Ver §13 (Historial de cambios) |
 
 > Este documento es el **contrato del sistema**. Todo código, test y decisión de diseño debe poder trazarse a una sección de este archivo. Si el código y la spec divergen, se corrige primero la spec y luego el código.
 
@@ -352,6 +352,7 @@ Alcance: el `PROFESIONAL` ve solo las suyas; el `ADMIN` ve las globales y por pr
 | `SERVICE_HAS_ACTIVE_BOOKINGS` | 409 | RN-07 |
 | `FORBIDDEN` / `NOT_FOUND` | 403 / 404 | RBAC-01, RBAC-02 |
 | `INVALID_REQUEST` | 422 | §11: cuerpo o parámetros mal formados (validación de esquema, motivo faltante) |
+| `AGENT_UNAVAILABLE` | 503 | §15: falta `ANTHROPIC_API_KEY` o el servicio del modelo no responde |
 
 ---
 
@@ -381,6 +382,10 @@ Alcance: el `PROFESIONAL` ve solo las suyas; el `ADMIN` ve las globales y por pr
 | D-04 | Stack tecnológico y motor de BD (requiere soporte de exclusión de rangos) | PostgreSQL. **Fase 2:** se usa SQLite local (`turnos.db`) y FastAPI; la exclusión de rangos se resuelve por transacción exclusiva (INV-03). PostgreSQL queda como destino de producción. |
 | D-06 | Autenticación real (F-01) aún no existe en Fase 2: ¿cómo se identifica al actor en los endpoints? | Provisoriamente por `cliente_id` / `cancelado_por_id` en el cuerpo. Es un atajo de la Fase 2: NO cumple RBAC-01 y se reemplaza al implementar F-01. |
 | D-05 | ¿Confirmación automática o aprobación manual del profesional? | Automática |
+| D-07 | Proveedor y modelo de LLM del agente (§15) | **Resuelta:** Anthropic, `claude-opus-5-5` (configurable con `ANTHROPIC_MODEL`) |
+| D-08 | Modelo de embeddings, tamaño de fragmento (chunk) y valor de K del Top-K (INV-06) | **Resuelta:** embeddings locales por defecto de ChromaDB (all-MiniLM-L6-v2), chunks por sección de hasta ~900 caracteres, K = 4 en el agente (3 por defecto en `buscar_conocimiento`) |
+| D-09 | Formatos admitidos por `POST /api/conocimiento` y límite de tamaño | **Resuelta:** `.md` y `.txt` en UTF-8; sin límite de tamaño en esta fase |
+| D-10 | ¿El agente tiene memoria de la conversación entre pedidos de `/api/chat`? Si la tiene, ¿dónde se guarda? (la §12 prohíbe tablas fuera de la §4) | **Resuelta:** sin memoria en el servidor; el cliente reenvía el `historial` en cada pedido |
 
 ---
 
@@ -394,6 +399,9 @@ Alcance: el `PROFESIONAL` ve solo las suyas; el `ADMIN` ve las globales y por pr
 | RBAC-02 | — | Criterio 7 |
 | INV-03 | — | Criterios 9, 10 |
 | RN-05 | — | Criterio 8 |
+| INV-04 | — | Criterios 12, 13 (§15.4) |
+| INV-05 | — | Criterios 14, 15 (§15.4) |
+| INV-06 | — | Criterios 16, 17, 18 (§15.4) |
 
 ---
 
@@ -463,6 +471,7 @@ La validación y la inserción ocurren en una única transacción (INV-03).
 | Versión | Fecha | Cambios |
 |---|---|---|
 | 0.1.0 | 2026-10-26 | Versión inicial del MVP. |
+| 0.3.0 | 2026-11-17 | Fase 3: nueva §15 (Módulo Agente Asistente `POST /api/chat` y Base de Conocimiento `POST /api/conocimiento`) con las reglas `INV-04`, `INV-05` e `INV-06`; decisiones D-07 a D-10 (resueltas en la implementación); contrato de los endpoints (§15.1.1); código `AGENT_UNAVAILABLE`; filas de trazabilidad en §10. La numeración de §12 a §14 no se modifica (ver nota en §15). |
 | 0.2.2 | 2026-11-03 | §11.2: se explicita que los identificadores vacíos o solo espacios responden `422 INVALID_REQUEST` (antes caían en `404 NOT_FOUND`). §14: matriz de tests automatizados. |
 | 0.2.1 | 2026-10-27 | Se agrega `INVALID_REQUEST` (422) al catálogo §7 y se usa en §11.1. |
 | 0.2.0 | 2026-10-27 | Alias `INV-01`/`INV-02` (texto inmutable); nueva `INV-03` (persistencia real); contrato REST de `/api/turnos` (§11); directiva de abstención (§12); decisiones D-04 (resuelta para Fase 2) y D-06; criterios de aceptación 9 a 11. |
@@ -501,3 +510,60 @@ Suite `pytest` en `tests/test_turnos.py` (17 casos: escenarios 1 a 5 de la matri
 | Integración (`@integracion`) | `tests/frontend_harness.cjs` carga el código **real** del HTML en Node y ejecuta contra un uvicorn propio (base temporal, puerto libre): el primer y último slot de cada servicio que ofrece la UI son aceptados por el backend; reserva y relectura de la lista; errores 409/403/422/404 con su mensaje; cancelación, cancelación repetida e inexistente; backend caído → `API_NO_DISPONIBLE`. |
 
 Ejecución: `python -m pytest` (todo, ~3,5 s) o `python -m pytest -m "not integracion"` (~1,5 s, sin Node). Requiere Node.js para el nivel de integración; sin Node esas pruebas se omiten.
+
+---
+
+## 15. Módulo Agente Asistente (`POST /api/chat`) y Base de Conocimiento (`POST /api/conocimiento`)
+
+> **Nota de numeración.** Esta sección se pidió como "§12", pero la §12 ya es la *Directiva de abstención* y está referenciada desde la §3 (INV-03), `plan.md` y el historial. Para no romper referencias existentes se agrega como §15 al final; el contenido es el solicitado.
+
+### 15.1 Alcance
+
+- **Agente asistente (`POST /api/chat`)**: recibe mensajes de un usuario en lenguaje natural y responde. Puede (a) consultar disponibilidad, (b) reservar y (c) cancelar turnos mediante *herramientas* conectadas al backend real (SQLite), y (d) responder consultas sobre servicios, coberturas y preparaciones a partir de documentos.
+- **Base de conocimiento (`POST /api/conocimiento`)**: permite cargar documentos en tiempo de ejecución (p. ej. `politicas_consultorio.md`) para que queden disponibles al agente sin reiniciar el sistema.
+- **Almacén vectorial**: ChromaDB, con búsqueda por similitud coseno. Es un almacén **independiente** de `turnos.db`: no agrega tablas ni columnas al esquema SQLite, por lo que cumple la §12 (directiva de abstención).
+- Las herramientas del agente DEBEN reutilizar las funciones de dominio existentes (`registrar_turno`, `registrar_cancelacion`, `verificar_sin_solapamiento`) y no reimplementar reglas.
+- La identificación del actor sigue siendo provisoria (D-06).
+
+### 15.1.1 Contrato implementado
+
+| Endpoint | Entrada | Respuesta `200` |
+|---|---|---|
+| `POST /api/chat` | `mensaje` (texto no vacío); opcionales `cliente_id` (paciente de la sesión, provisorio por D-06) e `historial` (`[{role, content}]`, solo texto) | `respuesta`, `tools_usadas` (`[{herramienta, entrada, resultado, error}]`, para auditar INV-04) y `turnos_modificados` (el frontend refresca la tabla si es `true`) |
+| `POST /api/conocimiento` | `multipart/form-data` con el campo `archivo` (`.md` o `.txt`, UTF-8) | `archivo` y `chunks` (cantidad de fragmentos indexados); un archivo con el mismo nombre reemplaza al anterior |
+
+Herramientas del agente (nombres tal como las ve el modelo): `consultar_politicas(pregunta)`, `consultar_turnos(fecha?)`, `reservar_turno(paciente, servicio_id, fecha_hora)` y `cancelar_turno(turno_id)`. Se adaptan al esquema de la §4: los ids son texto (no enteros) y la reserva recibe `servicio_id` en lugar de un `motivo`, que no existe en el modelo de datos (§12). Con `cliente_id` en la sesión, el agente solo reserva y cancela para ese paciente y siempre con rol `CLIENTE`, de modo que INV-01 nunca se saltea; los ids de turnos ajenos no se exponen (RBAC-04). El bucle de herramientas admite como máximo 5 llamadas al modelo por pedido.
+
+### 15.2 Reglas invariantes
+
+#### INV-04 — Fidelidad de herramientas
+
+- El agente NUNCA DEBE confirmar un turno ni informar disponibilidad sin haber ejecutado previamente las herramientas reales conectadas a SQLite.
+- Toda afirmación del agente sobre el estado de un turno o de un horario DEBE derivar del resultado de una herramienta ejecutada en ese mismo intercambio, nunca de la memoria del modelo ni de una suposición.
+- Si la herramienta falla o no se ejecuta, el agente DEBE informarlo y NO DEBE presentar la operación como realizada.
+
+#### INV-05 — Respeto de invariantes core
+
+- El agente DEBE operar estrictamente a través de la lógica de validación existente: INV-01 (ventana de cancelación de 2 horas) e INV-02 (no solapamiento). Ninguna herramienta puede evitarlas ni duplicarlas con reglas propias.
+- Los errores de negocio `409` (`SLOT_UNAVAILABLE`, `CANCELLATION_WINDOW_EXPIRED`, `INVALID_STATE_TRANSITION`) DEBEN traducirse en una explicación clara y amable para el usuario, sin exponer códigos internos ni trazas, y sin reintentar la operación para forzarla.
+- El agente PUEDE ofrecer alternativas (p. ej. otros horarios libres obtenidos con la herramienta de disponibilidad), pero NO DEBE ejecutar una operación alternativa sin pedido explícito del usuario.
+
+#### INV-06 — Grounding documental y abstención
+
+- Toda consulta sobre servicios, coberturas o preparaciones DEBE responderse exclusivamente con fragmentos recuperados de ChromaDB mediante búsqueda vectorial (Top-K por similitud coseno).
+- Si la información no figura en los documentos cargados, el agente DEBE abstenerse explícitamente (indicar que no dispone de esa información) y NO DEBE inventar ni completar con conocimiento propio del modelo.
+- Un documento recién cargado con `POST /api/conocimiento` DEBE estar disponible para la búsqueda en el pedido siguiente, sin reiniciar el backend.
+
+### 15.3 Efecto sobre el catálogo de errores (§7)
+
+Los errores de dominio que surjan de las herramientas conservan los códigos de la §7. Los errores propios de `/api/chat` y `/api/conocimiento` (cuerpo mal formado, archivo vacío, extensión o codificación inválida) usan `INVALID_REQUEST` (422). Se agrega `AGENT_UNAVAILABLE` (503) a la §7.
+
+### 15.4 Criterios de aceptación (Given/When/Then)
+
+12. **Fidelidad al reservar (INV-04)**: *Dado* un usuario que pide reservar un horario libre, *cuando* el agente responde que el turno quedó confirmado, *entonces* existe un turno `CONFIRMADO` en `turnos.db` creado por la herramienta en ese intercambio.
+13. **Fidelidad ante fallo (INV-04)**: *Dado* que la herramienta de reserva devuelve error, *cuando* el agente responde, *entonces* no afirma que el turno fue confirmado y `GET /api/turnos` no contiene turno nuevo.
+14. **Ventana de cancelación (INV-05)**: *Dado* un turno que inicia en 1 h 59 min, *cuando* el usuario pide cancelarlo al agente, *entonces* el agente explica amablemente la política de 2 horas y el turno sigue `CONFIRMADO`.
+15. **Solapamiento (INV-05)**: *Dado* un horario ya ocupado, *cuando* el usuario pide reservarlo, *entonces* el agente explica que no está disponible, sin mostrar `SLOT_UNAVAILABLE`, y no se crea ningún turno.
+16. **Respuesta fundamentada (INV-06)**: *Dado* `politicas_consultorio.md` cargado, *cuando* el usuario pregunta qué obras sociales se aceptan, *entonces* el agente responde OSDE, Swiss Medical y Galeno, recuperadas de ChromaDB.
+17. **Abstención (INV-06)**: *Dado* que ningún documento cargado trata la preparación de una ecografía, *cuando* el usuario pregunta cómo prepararse, *entonces* el agente indica explícitamente que no tiene esa información y no inventa una preparación.
+18. **Carga dinámica (INV-06)**: *Dado* el caso 17, *cuando* se carga con `POST /api/conocimiento` un documento con esa preparación y se repite la pregunta, *entonces* el agente responde con el contenido del documento nuevo, sin reiniciar el backend.

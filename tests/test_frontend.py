@@ -37,14 +37,14 @@ def client(tmp_path, monkeypatch):
 # Contrato estático
 # --------------------------------------------------------------------------
 def test_el_frontend_apunta_al_puerto_del_backend():
-    assert "const API_URL = 'http://localhost:8000';" in HTML
+    assert "const API_URL = 'http://localhost:8001';" in HTML
 
 
 def test_las_rutas_que_usa_el_frontend_existen_en_la_api():
     usadas = set(re.findall(r"\$\{API_URL\}(/api/[\w/{}$.]+)|callApi\(['`](/api/[\w/{}$.]+)", HTML))
     rutas = {a or b for a, b in usadas}
     rutas = {re.sub(r"\$\{\w+\}", "{turno_id}", r) for r in rutas}
-    assert rutas == {"/api/turnos", "/api/turnos/{turno_id}/cancelar"}
+    assert rutas == {"/api/turnos", "/api/turnos/{turno_id}/cancelar", "/api/chat", "/api/conocimiento"}  # + Fase 3 (spec §15)
     assert rutas <= set(main.app.openapi()["paths"])
 
 

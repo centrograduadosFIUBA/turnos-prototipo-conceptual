@@ -30,7 +30,7 @@ const { useState, useRef, useMemo, useEffect, createContext, useContext } = Reac
 
 /* ============================ 1. CONFIG ============================ */
 const CONFIG = { CANCEL_WINDOW_H: 2, MIN_LEAD_H: 1, HORIZON_DAYS: 60, GRID_MIN: 15 };
-const API_URL = 'http://localhost:8000';
+const API_URL = 'http://localhost:8001';
 const MIN = 60000, HOUR = 3600000, DAY = 86400000;
 
 /* ============================ 2. TIEMPO ============================ */
@@ -64,7 +64,7 @@ const HTTP = {
   SLOT_UNAVAILABLE: 409, CANCELLATION_WINDOW_EXPIRED: 409, INVALID_CONTACT: 422, EMAIL_NOT_VERIFIED: 403,
   INVALID_TIME_RANGE: 422, INVALID_STATE_TRANSITION: 409, SERVICE_HAS_ACTIVE_BOOKINGS: 409,
   FORBIDDEN: 403, NOT_FOUND: 404, SERVICE_UNAVAILABLE: 409, REASON_REQUIRED: 422, INVALID_REQUEST: 422,
-  BACKEND_PENDIENTE: 501, API_NO_DISPONIBLE: 0,
+  AGENT_UNAVAILABLE: 503, BACKEND_PENDIENTE: 501, API_NO_DISPONIBLE: 0,
 };
 const fail = (state, code, message, details) => ({ state, error: { code, http: HTTP[code], message, details } });
 const succeed = (state, data) => ({ state, ok: true, data });
@@ -1096,6 +1096,112 @@ function AdminView() {
   );
 }
 
+/* ============================ 7b. ASISTENTE IA (spec §15) ============================ */
+// El asistente consulta y modifica turnos solo mediante herramientas del backend (INV-04); aquí solo se muestra
+// la conversación y qué herramientas ejecutó. Si creó o canceló un turno, se vuelve a leer la tabla desde la base.
+const ETIQUETA_TOOL = { consultar_politicas: '📚 Políticas', consultar_turnos: '📅 Turnos', reservar_turno: '✅ Reservar', cancelar_turno: '🗑️ Cancelar' };
+
+function ToolChips({ tools }) {
+  if (!tools.length) return <div className="mt-1 text-xs text-slate-500">Sin herramientas: respondió sin consultar datos.</div>;
+  return (
+    <div className="mt-2 space-y-1">
+      <div className="text-xs font-medium text-slate-500">Herramientas utilizadas ({tools.length})</div>
+      {tools.map((t, i) => (
+        <details key={i} className={`rounded-md border text-xs ${t.error ? 'border-red-300 dark:border-red-800' : 'border-slate-200 dark:border-slate-700'}`}>
+          <summary className="cursor-pointer px-2 py-1 select-none">
+            {ETIQUETA_TOOL[t.herramienta] || t.herramienta} <span className="text-slate-500">{t.herramienta}</span>{t.error ? ' · rechazada por el sistema' : ' · ok'}
+          </summary>
+          <pre className="overflow-x-auto whitespace-pre-wrap break-words px-2 pb-2 text-[11px]">{JSON.stringify({ entrada: t.entrada, resultado: t.resultado }, null, 2)}</pre>
+        </details>
+      ))}
+    </div>
+  );
+}
+
+function CargarConocimiento() {
+  const [file, setFile] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState(null); // { ok, text }
+  const subir = async () => {
+    if (!file) return;
+    setBusy(true); setMsg(null);
+    try {
+      const form = new FormData();
+      form.append('archivo', file);
+      const res = await fetch(`${API_URL}/api/conocimiento`, { method: 'POST', body: form });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) setMsg({ ok: true, text: `✓ "${data.archivo}" indexado: ${data.chunks} fragmentos. Ya está disponible para el asistente.` });
+      else setMsg({ ok: false, text: data.detalle || `El servidor respondió ${res.status}.` });
+    } catch {
+      setMsg({ ok: false, text: `No se pudo conectar con el backend (${API_URL}).` });
+    }
+    setBusy(false);
+  };
+  return (
+    <details className="mt-3 rounded-lg border border-slate-200 dark:border-slate-700">
+      <summary className="cursor-pointer select-none px-3 py-2 text-sm font-medium">📚 Cargar Conocimiento (.md / .txt)</summary>
+      <div className="space-y-2 px-3 pb-3">
+        <p className="text-xs text-slate-500">El documento se indexa en la base vectorial al instante, sin reiniciar el servidor. Si ya existe uno con el mismo nombre, se reemplaza.</p>
+        <div className="flex flex-wrap items-center gap-2">
+          <input type="file" accept=".md,.txt" aria-label="Documento de conocimiento" className="text-sm" onChange={(e) => { setFile(e.target.files[0] || null); setMsg(null); }} />
+          <button className={btnPrimary} disabled={!file || busy} onClick={subir}>{busy ? 'Indexando…' : 'Indexar documento'}</button>
+        </div>
+        {msg && <Notice tone={msg.ok ? 'ok' : 'error'} icon={msg.ok ? 'check' : 'alert'}>{msg.text}</Notice>}
+      </div>
+    </details>
+  );
+}
+
+function AsistentePanel({ clientId, recargar }) {
+  const [msgs, setMsgs] = useState([]); // { role: 'user'|'assistant', text, tools?, error? }
+  const [text, setText] = useState('');
+  const [busy, setBusy] = useState(false);
+  const endRef = useRef(null);
+  useEffect(() => { endRef.current?.scrollIntoView({ block: 'nearest' }); }, [msgs, busy]);
+  useEffect(() => { setMsgs([]); }, [clientId]); // otro paciente = otra conversación
+
+  const enviar = async () => {
+    const mensaje = text.trim();
+    if (!mensaje || busy) return;
+    const historial = msgs.filter((m) => !m.error).map((m) => ({ role: m.role, content: m.text }));
+    setMsgs((m) => [...m, { role: 'user', text: mensaje }]); setText(''); setBusy(true);
+    const r = await callApi('/api/chat', { mensaje, cliente_id: clientId, historial });
+    if (r.error) setMsgs((m) => [...m, { role: 'assistant', text: r.error.message, error: true, tools: [] }]);
+    else {
+      setMsgs((m) => [...m, { role: 'assistant', text: r.data.respuesta, tools: r.data.tools_usadas }]);
+      if (r.data.turnos_modificados) await recargar(true); // el agente creó o canceló un turno: refrescar la tabla
+    }
+    setBusy(false);
+  };
+
+  return (
+    <section className={`${card} mb-6 p-4`} aria-label="Asistente IA de Turnos">
+      <div className="mb-2 flex items-center justify-between">
+        <h2 className="font-semibold">🤖 Asistente IA de Turnos</h2>
+        {msgs.length > 0 && <button className={btnGhost} onClick={() => setMsgs([])}>Nueva conversación</button>}
+      </div>
+      <div className="max-h-96 min-h-24 space-y-3 overflow-y-auto rounded-lg bg-slate-50 p-3 dark:bg-slate-800/50" aria-live="polite">
+        {msgs.length === 0 && <p className="text-sm text-slate-500">Probá: “¿Qué obras sociales aceptan?”, “¿Qué turnos hay mañana?” o “Quiero reservar una consulta general”.</p>}
+        {msgs.map((m, i) => (
+          <div key={i} className={m.role === 'user' ? 'flex justify-end' : 'flex justify-start'}>
+            <div className={`max-w-[85%] rounded-xl px-3 py-2 text-sm ${m.role === 'user' ? 'bg-indigo-600 text-white' : m.error ? 'border border-red-300 bg-red-50 text-red-900 dark:bg-red-950/40 dark:text-red-100' : 'border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900'}`}>
+              <div className="whitespace-pre-wrap">{m.text}</div>
+              {m.role === 'assistant' && !m.error && <ToolChips tools={m.tools || []} />}
+            </div>
+          </div>
+        ))}
+        {busy && <div className="text-sm text-slate-500">El asistente está trabajando…</div>}
+        <div ref={endRef} />
+      </div>
+      <form className="mt-3 flex gap-2" onSubmit={(e) => { e.preventDefault(); enviar(); }}>
+        <input className={inputCls} value={text} onChange={(e) => setText(e.target.value)} placeholder="Escribí tu consulta…" aria-label="Mensaje para el asistente" disabled={busy} />
+        <button className={btnPrimary} type="submit" disabled={busy || !text.trim()}>Enviar</button>
+      </form>
+      <CargarConocimiento />
+    </section>
+  );
+}
+
 /* ============================ 8. APP ============================ */
 function App() {
   const [state, setState] = useState(() => makeInitialState());
@@ -1189,6 +1295,7 @@ function App() {
         </div>
       </header>
       <main className="mx-auto max-w-7xl px-4 py-6">
+        {view === 'cliente' && <AsistentePanel clientId={clientId} recargar={recargar} />}
         {view === 'cliente' ? <ClientView key={clientId} /> : <AdminView key={adminId} />}
       </main>
       {inbox && <InboxDrawer onClose={() => setInbox(false)} mode={view} actorUser={actorUser} clientId={clientId} />}

@@ -59,10 +59,10 @@ Requiere **Python 3.9 o superior**. Todos los comandos se ejecutan desde la carp
 3. Levantá el servidor (la base `turnos.db` se crea sola al iniciar):
 
    ```bash
-   uvicorn main:app --reload --port 8000
+   uvicorn main:app --reload --port 8001
    ```
 
-4. Probá la API en Swagger UI: http://localhost:8000/docs
+4. Probá la API en Swagger UI: http://localhost:8001/docs
 5. (Opcional) Cargá turnos de ejemplo: `python seed_demo.py --reset`
 6. Abrí `prototipo-turnos.html` en el navegador. Con el servidor corriendo, los turnos se leen y se guardan en SQLite.
 

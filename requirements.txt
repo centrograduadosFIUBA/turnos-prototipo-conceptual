@@ -6,3 +6,9 @@ pydantic>=2.0
 # Tests automatizados (Clase 5)
 pytest>=8.0
 httpx>=0.27   # requerido por fastapi.testclient.TestClient
+
+# Agente asistente y base de conocimiento (Clase 6)
+anthropic>=2.10    # SDK de Claude: motor del agente (agent.py)
+chromadb           # almacén vectorial local con búsqueda por similitud coseno
+python-dotenv      # lee ANTHROPIC_API_KEY desde .env
+python-multipart   # requerido por FastAPI para recibir UploadFile

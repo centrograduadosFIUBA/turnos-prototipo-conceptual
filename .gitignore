@@ -37,6 +37,9 @@ dist/
 .env
 .env.*
 
+# Base vectorial local (ChromaDB), se regenera con ingestar_conocimiento.py
+chroma_db/
+
 # Editores / IDE
 .idea/
 .vscode/
