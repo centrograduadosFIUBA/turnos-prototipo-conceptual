@@ -6,17 +6,21 @@ El agente NO tiene lógica de negocio propia: sus 4 herramientas llaman a las fu
  - INV-05: toda reserva/cancelación pasa por INV-01 e INV-02; los 409 vuelven al modelo como resultado de
            herramienta con error para que los explique con amabilidad.
  - INV-06: consultas sobre servicios/coberturas/preparaciones solo con fragmentos de ChromaDB; si no hay, abstenerse.
+ - INV-07: cada reserva/cancelación confirmada se avisa con `notificar(evento, turno)`.
+ - INV-08: máximo 5 iteraciones y corte ante una llamada idéntica consecutiva.
+ - INV-09: cada ejecución deja exactamente una fila en `audit_logs`.
 
 Uso:  from agent import ejecutar_agente
-      ejecutar_agente("¿Qué obras sociales aceptan?", cliente_id="c1")  ->  {"respuesta", "tools_usadas"}
+      ejecutar_agente("¿Qué obras sociales aceptan?", cliente_id="c1")  ->  {"respuesta", "tools_usadas", "turnos_modificados"}
 Requiere ANTHROPIC_API_KEY (en `.env` o en el entorno). Modelo: ANTHROPIC_MODEL (default claude-opus-5-5).
 """
 from __future__ import annotations
 
 import json
 import os
+import time
 from datetime import datetime, timedelta, timezone
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 import anthropic
 from dotenv import load_dotenv
@@ -103,6 +107,13 @@ TOOLS: list[dict[str, Any]] = [
 
 # Herramientas que modifican turnos: el frontend refresca la tabla cuando alguna se ejecutó sin error.
 HERRAMIENTAS_DE_ESCRITURA = {"reservar_turno", "cancelar_turno"}
+EVENTOS_WEBHOOK = {"reservar_turno": "turno.creado", "cancelar_turno": "turno.cancelado"}  # INV-07
+
+# Respuesta fija del circuit breaker (INV-08): la genera el servidor, sin llamar de nuevo al modelo.
+MENSAJE_CIRCUIT_BREAKER = (
+    "No pude completar la acción: me detuve para no repetir pasos sin avanzar. No des por hecha ninguna "
+    "operación que no figure en la tabla de turnos y revisala antes de volver a intentar."
+)
 
 
 def construir_system(cliente_id: Optional[str]) -> str:
@@ -274,43 +285,67 @@ def ejecutar_agente(
     cliente_id: Optional[str] = None,
     historial: Optional[list[dict]] = None,
     client: Optional[anthropic.Anthropic] = None,
+    origen: str = "chat_web",
+    notificar: Optional[Callable[[str, dict], None]] = None,
 ) -> dict:
     """Responde a `mensaje` ejecutando herramientas reales. Devuelve `{"respuesta", "tools_usadas", "turnos_modificados"}`.
 
     `tools_usadas` lista cada herramienta ejecutada (nombre, entrada, resultado, error) para auditarla.
-    Máximo `MAX_ITERACIONES` llamadas al modelo por pedido.
+    Máximo `MAX_ITERACIONES` llamadas al modelo por pedido; corta antes si se repite una llamada (INV-08).
+    `origen` (`chat_web` | `webhook_externo`) se registra en `audit_logs` (INV-09), también si hay una excepción.
+    `notificar(evento, turno)` se invoca tras cada reserva o cancelación ya confirmada en la base (INV-07).
     """
-    client = client or _crear_cliente()
-    system = construir_system(cliente_id)
-    messages: list[dict] = [{"role": m["role"], "content": m["content"]} for m in (historial or [])]
-    messages.append({"role": "user", "content": mensaje})
+    inicio, reloj = main.utcnow(), time.monotonic()
     tools_usadas: list[dict] = []
+    invocadas: list[str] = []
+    pasos, estado = 0, "error"  # queda en "error" si una excepción interrumpe la ejecución
+    anterior: Optional[tuple[str, str]] = None  # (herramienta, argumentos) de la última llamada
+    try:
+        client = client or _crear_cliente()
+        system = construir_system(cliente_id)
+        messages: list[dict] = [{"role": m["role"], "content": m["content"]} for m in (historial or [])]
+        messages.append({"role": "user", "content": mensaje})
 
-    for _ in range(MAX_ITERACIONES):
-        resp = _llamar_modelo(client, system, messages)
-        if resp.stop_reason == "refusal":
-            respuesta = "No puedo ayudarte con esa solicitud. Si querés, consultame por turnos o por las políticas del consultorio."
-            break
-        if resp.stop_reason != "tool_use":
-            respuesta = _texto(resp.content) or "No pude generar una respuesta."
-            break
-        messages.append({"role": "assistant", "content": resp.content})  # tal cual: incluye los bloques de razonamiento
-        resultados = []
-        for bloque in resp.content:
-            if getattr(bloque, "type", None) != "tool_use":
-                continue
-            entrada = dict(bloque.input or {})
-            salida, es_error = ejecutar_herramienta(bloque.name, entrada, cliente_id)
-            tools_usadas.append({"herramienta": bloque.name, "entrada": entrada, "resultado": salida, "error": es_error})
-            resultados.append({
-                "type": "tool_result", "tool_use_id": bloque.id, "is_error": es_error,
-                "content": json.dumps(salida, ensure_ascii=False),
-            })
-        messages.append({"role": "user", "content": resultados})  # todos los tool_result en un único mensaje
-    else:
-        respuesta = (
-            f"Llegué al límite de {MAX_ITERACIONES} pasos sin poder terminar. No des por hecha ninguna operación "
-            "que no figure en la tabla de turnos; probá de nuevo con un pedido más puntual."
+        for _ in range(MAX_ITERACIONES):
+            pasos += 1
+            resp = _llamar_modelo(client, system, messages)
+            if resp.stop_reason == "refusal":
+                respuesta = "No puedo ayudarte con esa solicitud. Si querés, consultame por turnos o por las políticas del consultorio."
+                estado = "ok"
+                break
+            if resp.stop_reason != "tool_use":
+                respuesta, estado = _texto(resp.content) or "No pude generar una respuesta.", "ok"
+                break
+            messages.append({"role": "assistant", "content": resp.content})  # tal cual: incluye los bloques de razonamiento
+            resultados, repetida = [], False
+            for bloque in resp.content:
+                if getattr(bloque, "type", None) != "tool_use":
+                    continue
+                entrada = dict(bloque.input or {})
+                firma = (bloque.name, json.dumps(entrada, sort_keys=True, ensure_ascii=False))
+                if firma == anterior:  # INV-08: la llamada repetida no se ejecuta
+                    repetida = True
+                    break
+                anterior = firma
+                invocadas.append(bloque.name)
+                salida, es_error = ejecutar_herramienta(bloque.name, entrada, cliente_id)
+                tools_usadas.append({"herramienta": bloque.name, "entrada": entrada, "resultado": salida, "error": es_error})
+                if notificar and not es_error and bloque.name in EVENTOS_WEBHOOK:
+                    notificar(EVENTOS_WEBHOOK[bloque.name], salida["turno"])
+                resultados.append({
+                    "type": "tool_result", "tool_use_id": bloque.id, "is_error": es_error,
+                    "content": json.dumps(salida, ensure_ascii=False),
+                })
+            if repetida:
+                respuesta, estado = MENSAJE_CIRCUIT_BREAKER, "circuit_breaker"
+                break
+            messages.append({"role": "user", "content": resultados})  # todos los tool_result en un único mensaje
+        else:
+            respuesta, estado = MENSAJE_CIRCUIT_BREAKER, "circuit_breaker"
+    finally:
+        main.registrar_auditoria(
+            inicio=inicio, origen=origen, prompt=mensaje, herramientas=invocadas, pasos=pasos,
+            latencia_ms=round((time.monotonic() - reloj) * 1000), estado=estado,
         )
 
     modificados = any(t["herramienta"] in HERRAMIENTAS_DE_ESCRITURA and not t["error"] for t in tools_usadas)

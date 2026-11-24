@@ -1171,6 +1171,7 @@ function AsistentePanel({ clientId, recargar }) {
       setMsgs((m) => [...m, { role: 'assistant', text: r.data.respuesta, tools: r.data.tools_usadas }]);
       if (r.data.turnos_modificados) await recargar(true); // el agente creó o canceló un turno: refrescar la tabla
     }
+    if (r.error) await recargar(true); // el agente pudo haber confirmado algo antes de fallar
     setBusy(false);
   };
 
@@ -1199,6 +1200,86 @@ function AsistentePanel({ clientId, recargar }) {
       </form>
       <CargarConocimiento />
     </section>
+  );
+}
+
+/* ============================ 7c. MONITOR (spec §16) ============================ */
+const ESTADO_AUDIT = {
+  ok: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/50 dark:text-emerald-200',
+  error: 'bg-red-100 text-red-800 dark:bg-red-900/50 dark:text-red-200',
+  circuit_breaker: 'bg-amber-100 text-amber-800 dark:bg-amber-900/50 dark:text-amber-200',
+};
+
+// Mientras está abierto consulta GET /api/audit-logs cada 3 s. Si aparece una ejecución nueva que escribió
+// turnos (p. ej. iniciada por webhook), vuelve a leer la tabla desde la base.
+function MonitorAuditoria({ recargar }) {
+  const [open, setOpen] = useState(false);
+  const [logs, setLogs] = useState([]);
+  const [fallo, setFallo] = useState(false);
+  const [texto, setTexto] = useState('¿Qué turnos hay disponibles mañana?');
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState(null); // { ok, text }
+  const vistos = useRef(null); // ids ya mostrados
+
+  const leer = async () => {
+    try {
+      const res = await fetch(`${API_URL}/api/audit-logs`);
+      if (!res.ok) throw new Error(res.status);
+      const filas = await res.json();
+      const escribio = vistos.current && filas.some((f) => !vistos.current.has(f.id)
+        && f.herramientas.some((h) => h === 'reservar_turno' || h === 'cancelar_turno'));
+      vistos.current = new Set(filas.map((f) => f.id));
+      setLogs(filas); setFallo(false);
+      if (escribio) recargar(true);
+    } catch { setFallo(true); }
+  };
+  useEffect(() => {
+    if (!open) return undefined;
+    leer();
+    const tick = setInterval(leer, 3000);
+    return () => clearInterval(tick);
+  }, [open]);
+
+  const simular = async () => {
+    const mensaje = texto.trim();
+    if (!mensaje || busy) return;
+    setBusy(true); setMsg(null);
+    const r = await callApi('/api/webhooks/externo', { canal: 'whatsapp', remitente: 'simulador-web', mensaje });
+    setMsg(r.error ? { ok: false, text: r.error.message }
+      : { ok: true, text: '202 Accepted: el agente lo procesa en segundo plano. El registro aparece en la tabla al terminar.' });
+    setBusy(false);
+  };
+
+  return (
+    <details className={`${card} mb-6`} onToggle={(e) => setOpen(e.currentTarget.open)}>
+      <summary className="cursor-pointer select-none px-4 py-3 font-semibold">🛡️ Monitor de Auditoría & Webhooks</summary>
+      <div className="space-y-3 px-4 pb-4">
+        <form className="flex flex-wrap gap-2" onSubmit={(e) => { e.preventDefault(); simular(); }}>
+          <input className={`${inputCls} flex-1 min-w-48`} value={texto} onChange={(e) => setTexto(e.target.value)} aria-label="Mensaje entrante simulado" />
+          <button className={btnPrimary} type="submit" disabled={busy || !texto.trim()}>Simular Mensaje Entrante (Webhook)</button>
+        </form>
+        {msg && <Notice tone={msg.ok ? 'ok' : 'error'} icon={msg.ok ? 'check' : 'alert'}>{msg.text}</Notice>}
+        {fallo && <Notice tone="error" icon="alert">No se pudo leer la auditoría desde {API_URL}.</Notice>}
+        <div className="max-h-80 overflow-auto">
+          <table className="w-full text-xs">
+            <thead><tr className={`text-left ${muted}`}><th className="py-1 pr-3">Cuándo</th><th className="pr-3">Origen</th><th className="pr-3">Pasos</th><th className="pr-3">Latencia</th><th>Estado</th></tr></thead>
+            <tbody>
+              {logs.map((l) => (
+                <tr key={l.id} className="border-t border-slate-200 dark:border-slate-700" title={l.herramientas.join(' → ') || 'Sin herramientas'}>
+                  <td className="py-1 pr-3 whitespace-nowrap">{fmtDT(Date.parse(l.timestamp))}</td>
+                  <td className="pr-3 font-mono">{l.origen}</td>
+                  <td className="pr-3">{l.pasos}</td>
+                  <td className="pr-3 whitespace-nowrap">{l.latencia_ms} ms</td>
+                  <td><span className={`rounded-full px-2 py-0.5 font-semibold ${ESTADO_AUDIT[l.estado]}`}>{l.estado}</span></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {logs.length === 0 && !fallo && <p className={`py-2 text-sm ${muted}`}>Todavía no hay ejecuciones del agente.</p>}
+        </div>
+        <p className={`text-xs ${muted}`}>Últimas 20 ejecuciones, actualizadas cada 3 s. Pasá el cursor sobre una fila para ver las herramientas.</p>
+      </div>
+    </details>
   );
 }
 
@@ -1296,6 +1377,7 @@ function App() {
       </header>
       <main className="mx-auto max-w-7xl px-4 py-6">
         {view === 'cliente' && <AsistentePanel clientId={clientId} recargar={recargar} />}
+        <MonitorAuditoria recargar={recargar} />
         {view === 'cliente' ? <ClientView key={clientId} /> : <AdminView key={adminId} />}
       </main>
       {inbox && <InboxDrawer onClose={() => setInbox(false)} mode={view} actorUser={actorUser} clientId={clientId} />}

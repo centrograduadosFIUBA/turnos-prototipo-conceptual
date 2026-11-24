@@ -2,10 +2,10 @@
 
 | Campo | Valor |
 |---|---|
-| Versión | 0.3.0 (Fase 3: agente asistente y base de conocimiento) |
+| Versión | 0.4.1 (Fase 3, cierre: agentes confiables) |
 | Estado | Borrador para revisión |
 | Metodología | Spec-Driven Development (SDD) |
-| Fecha | 2026-11-17 |
+| Fecha | 2026-11-24 |
 | Cambios respecto de 0.1.0 | Ver §13 (Historial de cambios) |
 
 > Este documento es el **contrato del sistema**. Todo código, test y decisión de diseño debe poder trazarse a una sección de este archivo. Si el código y la spec divergen, se corrige primero la spec y luego el código.
@@ -233,6 +233,38 @@ Estados: `CONFIRMADO` → `CANCELADO` | `COMPLETADO` | `AUSENTE`.
 | **Bloqueo** | `id`, `profesional_id`, `inicio`, `fin`, `motivo` | Rangos no reservables (F-09, RN-05). |
 | **AuditoriaEvento** | `id`, `entidad`, `entidad_id`, `accion`, `actor_id`, `rol`, `ocurrido_en`, `detalle` | Trazabilidad inmutable (RN-08). |
 
+#### audit_logs (INV-09)
+
+Registro de ejecuciones del agente. Es **distinta** de `AuditoriaEvento` (RN-08), que audita cambios sobre entidades de dominio: `audit_logs` no la reemplaza ni la implementa.
+
+| Columna | Tipo SQLite | Restricciones | Contenido |
+|---|---|---|---|
+| `id` | TEXT | PK (UUID) | Identificador de la ejecución. |
+| `timestamp` | TEXT | NOT NULL | Inicio de la ejecución, UTC, formato `YYYY-MM-DDTHH:MM:SSZ`. |
+| `origen` | TEXT | NOT NULL, CHECK IN (`chat_web`, `webhook_externo`) | Canal que inició la ejecución. |
+| `prompt` | TEXT | NOT NULL | Mensaje recibido, sin el prompt del sistema ni el historial. |
+| `herramientas` | TEXT | NOT NULL, default `'[]'` | Arreglo JSON con los nombres de las herramientas ejecutadas, en orden y con repeticiones. |
+| `pasos` | INTEGER | NOT NULL, CHECK BETWEEN 0 AND 5 | Cantidad de llamadas al modelo (iteraciones del bucle). |
+| `latencia_ms` | INTEGER | NOT NULL, CHECK ≥ 0 | Duración total de la ejecución en milisegundos. |
+| `estado` | TEXT | NOT NULL, CHECK IN (`ok`, `error`, `circuit_breaker`) | Resultado final (ver INV-09). |
+
+Índice por `timestamp`. Sin claves foráneas: el registro debe poder escribirse aunque la ejecución haya fallado.
+
+#### webhook_logs (INV-07)
+
+Resultado final de cada entrega de webhook saliente (una fila por notificación, no por intento).
+
+| Columna | Tipo SQLite | Restricciones | Contenido |
+|---|---|---|---|
+| `id` | TEXT | PK (UUID) | Identificador de la entrega. |
+| `timestamp` | TEXT | NOT NULL | Momento del resultado final, UTC `YYYY-MM-DDTHH:MM:SSZ`. |
+| `evento` | TEXT | NOT NULL | `turno.creado` o `turno.cancelado`. |
+| `turno_id` | TEXT | nullable | Turno notificado. |
+| `estado` | TEXT | NOT NULL, CHECK IN (`entregado`, `fallido`) | Resultado final. |
+| `intentos` | INTEGER | NOT NULL, CHECK BETWEEN 1 AND 4 | Intentos realizados. |
+| `codigo_http` | INTEGER | nullable | Último status recibido; nulo si no hubo respuesta. |
+| `error` | TEXT | nullable | Tipo del último error. No incluye la URL de destino (puede contener un token). |
+
 ### 4.2 Relaciones y cardinalidad
 
 ```
@@ -386,6 +418,10 @@ Alcance: el `PROFESIONAL` ve solo las suyas; el `ADMIN` ve las globales y por pr
 | D-08 | Modelo de embeddings, tamaño de fragmento (chunk) y valor de K del Top-K (INV-06) | **Resuelta:** embeddings locales por defecto de ChromaDB (all-MiniLM-L6-v2), chunks por sección de hasta ~900 caracteres, K = 4 en el agente (3 por defecto en `buscar_conocimiento`) |
 | D-09 | Formatos admitidos por `POST /api/conocimiento` y límite de tamaño | **Resuelta:** `.md` y `.txt` en UTF-8; sin límite de tamaño en esta fase |
 | D-10 | ¿El agente tiene memoria de la conversación entre pedidos de `/api/chat`? Si la tiene, ¿dónde se guarda? (la §12 prohíbe tablas fuera de la §4) | **Resuelta:** sin memoria en el servidor; el cliente reenvía el `historial` en cada pedido |
+| D-11 | ¿Qué endpoint recibe los webhooks externos que inician al agente (`origen = webhook_externo`)? ¿Con qué cuerpo, autenticación y permisos de escritura? | **Resuelta (§16.5):** `POST /api/webhooks/externo`, sin autenticación (igual que `/api/chat`, D-06) y sin paciente de sesión. La autenticación queda pendiente (D-14) |
+| D-12 | ¿El webhook saliente (INV-07) se firma o autentica (p. ej. HMAC)? | **Abierta.** Por defecto sin firma; el cuerpo solo lleva ids, sin datos de contacto |
+| D-13 | `audit_logs.prompt` puede contener datos personales: ¿retención y quién puede leerlo? | **Parcial.** Lectura por `GET /api/audit-logs` (últimas 20, sin autenticación en esta fase). Retención y control de acceso siguen abiertos; no desplegar fuera de un entorno local sin resolverlos |
+| D-14 | ¿Cómo se autentica el webhook entrante y cómo se vincula `remitente` con un paciente? | **Abierta.** Hoy no se autentica y `remitente` no otorga identidad: no se puede cancelar; sí reservar nombrando a un paciente, igual que en `/api/chat` sin `cliente_id` |
 
 ---
 
@@ -402,6 +438,9 @@ Alcance: el `PROFESIONAL` ve solo las suyas; el `ADMIN` ve las globales y por pr
 | INV-04 | — | Criterios 12, 13 (§15.4) |
 | INV-05 | — | Criterios 14, 15 (§15.4) |
 | INV-06 | — | Criterios 16, 17, 18 (§15.4) |
+| INV-07 | — | Criterios 19, 20, 21 (§16.4) |
+| INV-08 | — | Criterios 22, 23 (§16.4) |
+| INV-09 | — | Criterios 24, 25 (§16.4) |
 
 ---
 
@@ -463,6 +502,7 @@ La validación y la inserción ocurren en una única transacción (INV-03).
 - El esquema de `turnos.db` y los contratos de la API SOLO PUEDEN usar las entidades, tablas y campos definidos en la §4. Está prohibido inventar tablas, columnas, enums o campos que no figuren allí.
 - Si una necesidad no está cubierta por la §4, se registra en la §9 como decisión abierta y se resuelve **en el spec primero**, antes de tocar código.
 - Tablas permitidas en la Fase 2: `Usuario`, `Servicio`, `Turno` (obligatorias para este contrato) y, si se implementan sus reglas, `HorarioLaboral`, `Bloqueo` y `AuditoriaEvento`. Ninguna otra.
+- Desde la v0.4.0 se permiten además `audit_logs` (§4.1, INV-09) y, desde la v0.4.1, `webhook_logs` (§4.1, INV-07).
 
 ---
 
@@ -471,6 +511,8 @@ La validación y la inserción ocurren en una única transacción (INV-03).
 | Versión | Fecha | Cambios |
 |---|---|---|
 | 0.1.0 | 2026-10-26 | Versión inicial del MVP. |
+| 0.4.1 | 2026-11-24 | INV-07: se reintenta solo ante red, timeout o `5xx`; tabla `webhook_logs`. §16.5: contratos de `POST /api/webhooks/externo` y `GET /api/audit-logs`. D-11 resuelta, D-13 parcial, D-14 abierta. §14.2: tests de confiabilidad. |
+| 0.4.0 | 2026-11-24 | Nueva §16 (Módulo de Confiabilidad, Webhooks y Guardrails Operativos) con `INV-07`, `INV-08` e `INV-09`; tabla `audit_logs` (§4.1, §12); decisiones abiertas D-11 a D-13; criterios 19 a 25; filas de trazabilidad en §10. |
 | 0.3.0 | 2026-11-17 | Fase 3: nueva §15 (Módulo Agente Asistente `POST /api/chat` y Base de Conocimiento `POST /api/conocimiento`) con las reglas `INV-04`, `INV-05` e `INV-06`; decisiones D-07 a D-10 (resueltas en la implementación); contrato de los endpoints (§15.1.1); código `AGENT_UNAVAILABLE`; filas de trazabilidad en §10. La numeración de §12 a §14 no se modifica (ver nota en §15). |
 | 0.2.2 | 2026-11-03 | §11.2: se explicita que los identificadores vacíos o solo espacios responden `422 INVALID_REQUEST` (antes caían en `404 NOT_FOUND`). §14: matriz de tests automatizados. |
 | 0.2.1 | 2026-10-27 | Se agrega `INVALID_REQUEST` (422) al catálogo §7 y se usa en §11.1. |
@@ -510,6 +552,10 @@ Suite `pytest` en `tests/test_turnos.py` (17 casos: escenarios 1 a 5 de la matri
 | Integración (`@integracion`) | `tests/frontend_harness.cjs` carga el código **real** del HTML en Node y ejecuta contra un uvicorn propio (base temporal, puerto libre): el primer y último slot de cada servicio que ofrece la UI son aceptados por el backend; reserva y relectura de la lista; errores 409/403/422/404 con su mensaje; cancelación, cancelación repetida e inexistente; backend caído → `API_NO_DISPONIBLE`. |
 
 Ejecución: `python -m pytest` (todo, ~3,5 s) o `python -m pytest -m "not integracion"` (~1,5 s, sin Node). Requiere Node.js para el nivel de integración; sin Node esas pruebas se omiten.
+
+### 14.2 Confiabilidad (§16)
+
+`tests/test_confiabilidad.py` cubre INV-07 a INV-09 y los endpoints de §16.5 sin red: el receptor del webhook y el modelo se simulan, y las esperas de reintento se registran en lugar de dormir. `tests/conftest.py` deja `WEBHOOK_NOTIFY_URL` vacía para que la suite nunca llame a un receptor real.
 
 ---
 
@@ -567,3 +613,104 @@ Los errores de dominio que surjan de las herramientas conservan los códigos de 
 16. **Respuesta fundamentada (INV-06)**: *Dado* `politicas_consultorio.md` cargado, *cuando* el usuario pregunta qué obras sociales se aceptan, *entonces* el agente responde OSDE, Swiss Medical y Galeno, recuperadas de ChromaDB.
 17. **Abstención (INV-06)**: *Dado* que ningún documento cargado trata la preparación de una ecografía, *cuando* el usuario pregunta cómo prepararse, *entonces* el agente indica explícitamente que no tiene esa información y no inventa una preparación.
 18. **Carga dinámica (INV-06)**: *Dado* el caso 17, *cuando* se carga con `POST /api/conocimiento` un documento con esa preparación y se repite la pregunta, *entonces* el agente responde con el contenido del documento nuevo, sin reiniciar el backend.
+
+---
+
+## 16. Módulo de Confiabilidad, Webhooks y Guardrails Operativos
+
+### 16.1 Alcance
+
+Agrega tres garantías operativas sobre lo ya definido: notificación saliente por webhook, corte del bucle del agente y auditoría persistente de sus ejecuciones. No modifica `INV-01` a `INV-06`. La notificación por webhook no reemplaza a la notificación por email (F-13).
+
+### 16.2 Reglas invariantes
+
+#### INV-07 — Desacoplamiento y resiliencia de webhooks
+
+**Disparo**
+- Toda reserva o cancelación **exitosa** DEBE disparar un `POST` HTTP a la URL de `WEBHOOK_NOTIFY_URL`, tanto si se originó en la API REST (§11) como en una herramienta del agente (§15).
+- El envío DEBE ejecutarse en segundo plano (`BackgroundTasks` de FastAPI) y **después del `COMMIT`**. Nunca dentro de la transacción de escritura ni antes de responder al cliente.
+- Una operación rechazada o revertida NO DEBE notificarse.
+- Si el agente confirmó una operación y luego la ejecución falla o la corta INV-08, la notificación DEBE enviarse igual.
+- Si `WEBHOOK_NOTIFY_URL` no está definida o está vacía, no se envía nada y la operación funciona con normalidad.
+
+**Cuerpo** (`Content-Type: application/json`)
+
+| Campo | Contenido |
+|---|---|
+| `evento` | `turno.creado` o `turno.cancelado` |
+| `turno` | Objeto Turno con los mismos campos de §11.1 |
+
+**Reintentos**
+- Un intento es exitoso solo con respuesta `2xx`.
+- Se reintenta ante error de red, timeout o status `>= 500`. Cualquier otro status que no sea `2xx` (p. ej. `4xx`) es un fallo definitivo: no se reintenta.
+- Cada intento tiene un timeout estricto de **3 segundos**.
+- Ante un fallo reintentable: hasta **3 reintentos**, esperando 1 s, 2 s y 4 s antes de cada uno. Son como máximo **4 intentos** en total (1 original + 3 reintentos).
+- Cada intento se registra en la consola del servidor. El resultado final (`entregado` o `fallido`) se guarda en `webhook_logs` (§4.1).
+- Sin `WEBHOOK_NOTIFY_URL` se registra en consola y no se guarda ninguna fila.
+
+**Aislamiento**
+- El fallo o timeout del servicio externo NUNCA DEBE revertir, bloquear ni demorar la transacción en SQLite, ni cambiar el status o el cuerpo de la respuesta al cliente.
+
+**Limitación aceptada**: la entrega es de mejor esfuerzo. Las notificaciones pendientes se pierden si el proceso se reinicia (no hay cola persistente). Un receptor PUEDE recibir un evento repetido y DEBE tolerarlo.
+
+#### INV-08 — Guardrail anti-bucle y circuit breaker
+
+- El bucle de razonamiento (`agent.py`) DEBE tener un máximo de **5 iteraciones** por ejecución. Una iteración es una llamada al modelo.
+- El agente DEBE detectar llamadas idénticas **consecutivas**: misma herramienta y mismos parámetros que la llamada inmediatamente anterior de la misma ejecución, estén en la misma respuesta del modelo o en respuestas distintas. Los parámetros se comparan por valor, sin importar el orden de las claves.
+- La llamada repetida NO DEBE ejecutarse.
+- El circuit breaker se activa (a) al detectar una repetición o (b) cuando la quinta iteración todavía pide herramientas. Al activarse, la ejecución DEBE cortarse de inmediato, **sin ninguna otra llamada al modelo**.
+- La respuesta es un mensaje de fallback fijo, generado por el servidor: indica que no se pudo completar el pedido y que se verifiquen los turnos antes de reintentar. NO DEBE afirmar operaciones no realizadas (INV-04) ni mostrar detalles técnicos.
+- `/api/chat` responde `200` con ese mensaje. Las operaciones ya confirmadas antes del corte **no se revierten** y DEBEN reflejarse en `tools_usadas` y `turnos_modificados`.
+
+#### INV-09 — Trazabilidad y auditoría persistente
+
+- Toda ejecución del agente, iniciada por chat (`chat_web`) o por webhook externo (`webhook_externo`, ver D-11), DEBE registrar **exactamente una** fila en `audit_logs` (§4.1) con: timestamp, origen, prompt recibido, secuencia de herramientas invocadas, cantidad de pasos, latencia en milisegundos y estado final.
+- El registro DEBE escribirse también cuando la ejecución falla o la corta INV-08, conservando las herramientas ejecutadas hasta ese momento.
+- Estado final:
+
+| `estado` | Cuándo |
+|---|---|
+| `ok` | El bucle terminó con una respuesta del modelo. Incluye rechazos del modelo y errores de negocio explicados al usuario (INV-05). |
+| `error` | La ejecución terminó por una falla: modelo no disponible, falta `ANTHROPIC_API_KEY` o excepción inesperada. |
+| `circuit_breaker` | La cortó INV-08. |
+
+- Un pedido rechazado por validación (`422`) no llega al agente y NO se registra.
+- La fila se escribe en una transacción propia, separada de la de turnos. Si falla la escritura de auditoría, se informa en el log del servidor y NO DEBE revertir operaciones ni impedir la respuesta.
+- La tabla es de solo inserción: la aplicación NO DEBE modificar ni borrar filas.
+- NO DEBEN guardarse claves de API, el prompt del sistema ni trazas de error.
+
+### 16.3 Configuración
+
+| Variable | Obligatoria | Default | Uso |
+|---|---|---|---|
+| `WEBHOOK_NOTIFY_URL` | No | vacío (webhooks desactivados) | Destino de las notificaciones de INV-07. |
+
+### 16.4 Criterios de aceptación (Given/When/Then)
+
+19. **Notificación (INV-07)**: *Dado* un receptor disponible, *cuando* se crea o cancela un turno (por API o por el agente), *entonces* recibe un `POST` con el `evento` y el `turno` correspondientes.
+20. **Receptor caído (INV-07)**: *Dado* un receptor que siempre responde `5xx` o no está disponible, *cuando* se crea un turno, *entonces* la API responde `201`, el turno queda `CONFIRMADO` y se hacen 4 intentos con esperas de 1, 2 y 4 s.
+21. **Receptor lento (INV-07)**: *Dado* un receptor que no responde, *cuando* se cancela un turno, *entonces* la respuesta al cliente no espera al webhook y cada intento se corta a los 3 s.
+22. **Llamada repetida (INV-08)**: *Dado* un modelo que pide dos veces seguidas la misma herramienta con los mismos parámetros, *entonces* la segunda no se ejecuta, no hay más llamadas al modelo y se devuelve el fallback.
+23. **Límite de pasos (INV-08)**: *Dado* un modelo que siempre pide herramientas distintas, *entonces* se hacen exactamente 5 llamadas al modelo y se devuelve el fallback.
+24. **Auditoría completa (INV-09)**: *Dado* un pedido por `/api/chat`, *cuando* termina, *entonces* hay una fila nueva en `audit_logs` con `origen = chat_web`, las herramientas en orden, los pasos, la latencia y `estado = ok`.
+25. **Auditoría ante fallo (INV-09)**: *Dado* un fallo del modelo o un corte por INV-08, *entonces* la fila se registra igual con `estado = error` o `circuit_breaker`.
+
+### 16.5 Contrato de los endpoints nuevos
+
+#### `POST /api/webhooks/externo`
+
+| Aspecto | Definición |
+|---|---|
+| Cuerpo | `canal` (p. ej. `whatsapp`), `remitente` y `mensaje`: textos no vacíos |
+| Respuesta `202` | `{"status": "procesando"}`, inmediata; el agente corre después en segundo plano (`BackgroundTasks`) |
+| `422 INVALID_REQUEST` | Cuerpo mal formado o algún campo vacío; no se ejecuta ni se audita nada |
+| Auditoría | `origen = webhook_externo`, `prompt = mensaje` (INV-09). Los fallos (p. ej. sin `ANTHROPIC_API_KEY`) quedan como `estado = error` |
+| Alcance | En esta fase la respuesta del agente **no** se envía al remitente; `canal` y `remitente` no se persisten. Sin autenticación ni identidad (D-14) |
+
+#### `GET /api/audit-logs`
+
+Respuesta `200`: las últimas **20** filas de `audit_logs`, de la más reciente a la más antigua, con las columnas de §4.1 (`herramientas` como arreglo JSON).
+
+#### Efecto sobre `POST /api/chat`
+
+Si la ejecución falla (modelo no disponible o excepción inesperada) responde `503 AGENT_UNAVAILABLE`; las notificaciones de operaciones ya confirmadas se envían igual (INV-07).

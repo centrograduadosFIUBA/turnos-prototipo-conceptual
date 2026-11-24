@@ -280,10 +280,11 @@ def test_el_system_prompt_obliga_a_las_tres_reglas(client):
 # Bucle de Tool Calling
 # --------------------------------------------------------------------------
 def test_el_bucle_se_corta_a_las_5_iteraciones(client):
-    modelo = ModeloFalso()  # siempre pide otra herramienta
+    # siempre pide otra herramienta, con argumentos distintos para no disparar el detector de repeticiones
+    modelo = ModeloFalso(*[respuesta(uso("consultar_turnos", {"fecha": f"2030-01-0{i}"})) for i in range(1, 7)])
     out = agent.ejecutar_agente("hola", cliente_id="c1", client=modelo)
     assert len(modelo.pedidos) == agent.MAX_ITERACIONES == 5
-    assert len(out["tools_usadas"]) == 5 and "límite" in out["respuesta"]
+    assert len(out["tools_usadas"]) == 5 and out["respuesta"] == agent.MENSAJE_CIRCUIT_BREAKER
 
 
 def test_una_herramienta_desconocida_no_rompe_el_bucle(client):

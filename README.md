@@ -68,6 +68,44 @@ Requiere **Python 3.9 o superior**. Todos los comandos se ejecutan desde la carp
 
 Si PowerShell bloquea la activación del entorno, ejecutá una vez `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`.
 
+## Agentes confiables (Clase 7, cierre de la Fase 3)
+
+El asistente de turnos (`agent.py`) suma tres garantías, definidas en la §16 de [spec.md](spec.md):
+
+| Regla | Qué hace |
+|---|---|
+| **INV-07** Webhooks | Cada reserva o cancelación confirmada se notifica por `POST` en segundo plano ([webhooks.py](webhooks.py)): timeout de 3 s y hasta 3 reintentos (1, 2 y 4 s) ante errores de red o HTTP ≥ 500. Un fallo no afecta al turno. |
+| **INV-08** Anti-bucle | Máximo 5 iteraciones y corte ante una llamada idéntica consecutiva, con un mensaje de respaldo. |
+| **INV-09** Auditoría | Cada ejecución del agente queda en la tabla `audit_logs`. |
+
+### Configuración
+
+Copiá `.env_ejm` como `.env` y completá los valores. `.env` no se sube al repositorio.
+
+| Variable | Uso |
+|---|---|
+| `ANTHROPIC_API_KEY` | Necesaria para el asistente. |
+| `WEBHOOK_NOTIFY_URL` | Destino de las notificaciones. La URL de `.env_ejm` es de ejemplo: reemplazala por la tuya (por ejemplo, una generada en https://webhook.site) o dejala vacía para desactivar los webhooks. |
+
+### Endpoints nuevos
+
+| Endpoint | Descripción |
+|---|---|
+| `POST /api/webhooks/externo` | Recibe `{"canal": "whatsapp", "remitente": "...", "mensaje": "..."}`, responde `202` y procesa el mensaje en segundo plano. La respuesta del agente no se envía al remitente. |
+| `GET /api/audit-logs` | Últimas 20 ejecuciones del agente. |
+
+En la interfaz (http://localhost:8001/), abrí el panel **🛡️ Monitor de Auditoría & Webhooks** y usá **Simular Mensaje Entrante (Webhook)** para probar el flujo.
+
+> **Solo para uso local.** Estos endpoints no tienen autenticación: quien llegue al servidor puede ejecutar el agente (con costo), reservar a nombre de un paciente y leer los mensajes auditados.
+
+### Tests
+
+```bash
+python -m pytest
+```
+
+Los tests no usan la red ni la API de Anthropic: el modelo y el receptor de webhooks se simulan.
+
 ## Qué es
 
 Una aplicación web para reservar turnos con profesionales. Tiene dos vistas sobre los mismos datos en memoria:

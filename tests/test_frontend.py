@@ -41,10 +41,11 @@ def test_el_frontend_apunta_al_puerto_del_backend():
 
 
 def test_las_rutas_que_usa_el_frontend_existen_en_la_api():
-    usadas = set(re.findall(r"\$\{API_URL\}(/api/[\w/{}$.]+)|callApi\(['`](/api/[\w/{}$.]+)", HTML))
+    usadas = set(re.findall(r"\$\{API_URL\}(/api/[\w/{}$.-]+)|callApi\(['`](/api/[\w/{}$.-]+)", HTML))
     rutas = {a or b for a, b in usadas}
     rutas = {re.sub(r"\$\{\w+\}", "{turno_id}", r) for r in rutas}
-    assert rutas == {"/api/turnos", "/api/turnos/{turno_id}/cancelar", "/api/chat", "/api/conocimiento"}  # + Fase 3 (spec §15)
+    assert rutas == {"/api/turnos", "/api/turnos/{turno_id}/cancelar", "/api/chat", "/api/conocimiento",  # + Fase 3 (spec §15)
+                     "/api/audit-logs", "/api/webhooks/externo"}  # + confiabilidad (spec §16.5)
     assert rutas <= set(main.app.openapi()["paths"])
 
 

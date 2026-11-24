@@ -7,7 +7,10 @@ RN-03, RN-04 (parcial: ver "Fuera de alcance") y RN-06.
 Fase 3 (spec §15): agente asistente `POST /api/chat` (agent.py) y base de conocimiento
 `POST /api/conocimiento` (ingestar_conocimiento.py, ChromaDB). Ambos reutilizan la lógica de este archivo.
 
-Fuera de alcance en esta fase (spec §9, plan §5): horario laboral, bloqueos, auditoría, emails, login.
+Confiabilidad (spec §16): webhooks salientes en segundo plano (webhooks.py, INV-07), circuit breaker del
+agente (agent.py, INV-08), `audit_logs` (INV-09), `POST /api/webhooks/externo` y `GET /api/audit-logs`.
+
+Fuera de alcance en esta fase (spec §9, plan §5): horario laboral, bloqueos, auditoría de dominio (RN-08), emails, login.
 
 Organización del archivo:
     1. Configuración     constantes del spec
@@ -23,6 +26,10 @@ Probar:    python -m pytest
 """
 from __future__ import annotations
 
+import asyncio
+import importlib
+import json
+import logging
 import os
 import re
 import sqlite3
@@ -33,11 +40,15 @@ from enum import Enum
 from pathlib import Path
 from typing import Annotated, AsyncIterator, Iterator, Literal, Optional
 
-from fastapi import FastAPI, Path as RutaParam, Query, Request, UploadFile
+from fastapi import BackgroundTasks, FastAPI, Path as RutaParam, Query, Request, UploadFile
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field, StringConstraints
+
+import webhooks
+
+logger = logging.getLogger("turnos")
 
 # ----------------------------------------------------------------------------
 # Configuración (constantes del spec)
@@ -136,6 +147,27 @@ CREATE TABLE IF NOT EXISTS turno (
     CHECK (inicio < fin)
 );
 CREATE INDEX IF NOT EXISTS idx_turno_prof_inicio ON turno(profesional_id, inicio);
+CREATE TABLE IF NOT EXISTS audit_logs (
+    id           TEXT PRIMARY KEY,
+    timestamp    TEXT NOT NULL,
+    origen       TEXT NOT NULL CHECK (origen IN ('chat_web','webhook_externo')),
+    prompt       TEXT NOT NULL,
+    herramientas TEXT NOT NULL DEFAULT '[]',
+    pasos        INTEGER NOT NULL CHECK (pasos BETWEEN 0 AND 5),
+    latencia_ms  INTEGER NOT NULL CHECK (latencia_ms >= 0),
+    estado       TEXT NOT NULL CHECK (estado IN ('ok','error','circuit_breaker'))
+);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_timestamp ON audit_logs(timestamp);
+CREATE TABLE IF NOT EXISTS webhook_logs (
+    id          TEXT PRIMARY KEY,
+    timestamp   TEXT NOT NULL,
+    evento      TEXT NOT NULL,
+    turno_id    TEXT,
+    estado      TEXT NOT NULL CHECK (estado IN ('entregado','fallido')),
+    intentos    INTEGER NOT NULL CHECK (intentos BETWEEN 1 AND 4),
+    codigo_http INTEGER,
+    error       TEXT
+);
 """
 
 # Semilla tomada de los datos mock de index.html (sin turnos: los crea la API).
@@ -312,6 +344,31 @@ class ConocimientoOut(BaseModel):
     chunks: int
 
 
+class WebhookExternoIn(BaseModel):
+    """Cuerpo de `POST /api/webhooks/externo` (spec §16.5)."""
+
+    canal: IdTexto = Field(description="Canal de origen del mensaje.", examples=["whatsapp"])
+    remitente: IdTexto = Field(description="Quién escribe. No otorga identidad de paciente (D-14).", examples=["+5491155550101"])
+    mensaje: IdTexto = Field(description="Texto recibido; es el prompt del agente.", examples=["¿Qué obras sociales aceptan?"])
+
+
+class WebhookAceptadoOut(BaseModel):
+    status: Literal["procesando"] = "procesando"
+
+
+class AuditLogOut(BaseModel):
+    """Fila de `audit_logs` (INV-09)."""
+
+    id: str
+    timestamp: str
+    origen: Literal["chat_web", "webhook_externo"]
+    prompt: str
+    herramientas: list[str]
+    pasos: int
+    latencia_ms: int
+    estado: Literal["ok", "error", "circuit_breaker"]
+
+
 def fila_a_turno_out(row: sqlite3.Row) -> TurnoOut:
     """Convierte una fila de la tabla `turno` en el esquema de salida."""
     return TurnoOut(**{k: row[k] for k in TurnoOut.model_fields})
@@ -413,6 +470,29 @@ def registrar_cancelacion(conn: sqlite3.Connection, turno_id: str, data: Cancela
 
 
 # ----------------------------------------------------------------------------
+# Auditoría del agente (INV-09) y notificaciones (INV-07)
+# ----------------------------------------------------------------------------
+def registrar_auditoria(*, inicio: datetime, origen: str, prompt: str, herramientas: list[str],
+                        pasos: int, latencia_ms: int, estado: str) -> None:
+    """Inserta una fila en `audit_logs` en su propia transacción. Nunca lanza: un fallo al auditar
+    no revierte operaciones ni impide responder."""
+    try:
+        with write_tx() as conn:
+            conn.execute(
+                "INSERT INTO audit_logs (id, timestamp, origen, prompt, herramientas, pasos, latencia_ms, estado)"
+                " VALUES (?,?,?,?,?,?,?,?)",
+                (str(uuid.uuid4()), fmt(inicio), origen, prompt, json.dumps(herramientas), pasos, latencia_ms, estado),
+            )
+    except Exception:
+        logger.exception("No se pudo escribir en audit_logs (origen=%s, estado=%s)", origen, estado)
+
+
+def programar_notificacion(tareas: BackgroundTasks, evento: str, turno: dict) -> None:
+    """Encola el webhook para después de responder. Llamar solo tras el COMMIT (INV-07)."""
+    tareas.add_task(webhooks.enviar_notificacion_webhook, evento, turno)
+
+
+# ----------------------------------------------------------------------------
 # Aplicación FastAPI (capa 2)
 # ----------------------------------------------------------------------------
 @asynccontextmanager
@@ -436,7 +516,7 @@ Todos los errores responden `{"error": CODIGO, "detalle": texto}` (catálogo spe
 
 app = FastAPI(
     title="Turnos Pro API",
-    version="0.2.1",
+    version="0.4.1",
     description=DESCRIPCION_API,
     openapi_tags=[{"name": "Turnos", "description": "Consulta, reserva y cancelación de turnos."}],
     lifespan=lifespan,
@@ -506,7 +586,7 @@ def listar_turnos(
                                                 "`INVALID_TIME_RANGE` (RN-04) o `INVALID_CONTACT` (RN-03)."},
     },
 )
-def crear_turno(data: TurnoCreate) -> TurnoOut:
+def crear_turno(data: TurnoCreate, tareas: BackgroundTasks) -> TurnoOut:
     """Crea un turno `CONFIRMADO` para el cliente y servicio indicados.
 
     El profesional y el `fin` se calculan a partir del servicio. La validación y la inserción
@@ -514,7 +594,9 @@ def crear_turno(data: TurnoCreate) -> TurnoOut:
     por el mismo horario no pueden confirmarse ambos.
     """
     with write_tx() as conn:
-        return fila_a_turno_out(registrar_turno(conn, data, utcnow()))
+        turno = fila_a_turno_out(registrar_turno(conn, data, utcnow()))
+    programar_notificacion(tareas, "turno.creado", turno.model_dump(mode="json"))  # ya hubo COMMIT
+    return turno
 
 
 @app.post(
@@ -530,7 +612,9 @@ def crear_turno(data: TurnoCreate) -> TurnoOut:
                                                 "cuando cancela un PROFESIONAL/ADMIN."},
     },
 )
-def cancelar_turno(data: CancelarIn, turno_id: str = RutaParam(description="Id del turno a cancelar.")) -> TurnoOut:
+def cancelar_turno(
+    data: CancelarIn, tareas: BackgroundTasks, turno_id: str = RutaParam(description="Id del turno a cancelar.")
+) -> TurnoOut:
     """Pasa el turno a `CANCELADO`. El turno nunca se elimina físicamente (RN-06).
 
     Un `CLIENTE` solo puede cancelar sus propios turnos y con al menos 2 horas de anticipación
@@ -538,7 +622,9 @@ def cancelar_turno(data: CancelarIn, turno_id: str = RutaParam(description="Id d
     siempre que indiquen un motivo.
     """
     with write_tx() as conn:
-        return fila_a_turno_out(registrar_cancelacion(conn, turno_id, data, utcnow()))
+        turno = fila_a_turno_out(registrar_cancelacion(conn, turno_id, data, utcnow()))
+    programar_notificacion(tareas, "turno.cancelado", turno.model_dump(mode="json"))
+    return turno
 
 
 # ----------------------------------------------------------------------------
@@ -554,21 +640,75 @@ def cancelar_turno(data: CancelarIn, turno_id: str = RutaParam(description="Id d
         503: {"model": ErrorOut, "description": "`AGENT_UNAVAILABLE`: falta ANTHROPIC_API_KEY o el servicio del modelo no responde."},
     },
 )
-def chat(data: ChatIn) -> ChatOut:
+def chat(data: ChatIn, tareas: BackgroundTasks) -> ChatOut:
     """El agente responde con herramientas reales: consulta y reserva/cancela turnos en SQLite (INV-04) a través
     de las mismas reglas de la API REST (INV-05) y responde sobre políticas solo con fragmentos de ChromaDB (INV-06).
     `tools_usadas` lista las herramientas ejecutadas para poder auditarlas."""
-    import anthropic
-
     import agent  # import diferido: carga .env y evita un import circular con este módulo
 
     if not os.environ.get("ANTHROPIC_API_KEY"):
+        registrar_auditoria(inicio=utcnow(), origen="chat_web", prompt=data.mensaje, herramientas=[],
+                            pasos=0, latencia_ms=0, estado="error")
         raise DomainError(503, "AGENT_UNAVAILABLE", "El asistente no está configurado: falta ANTHROPIC_API_KEY en el archivo .env.")
     try:
-        salida = agent.ejecutar_agente(data.mensaje, data.cliente_id, [m.model_dump() for m in data.historial])
-    except anthropic.APIError as exc:
-        raise DomainError(503, "AGENT_UNAVAILABLE", f"El servicio del asistente no respondió ({type(exc).__name__}).")
+        salida = agent.ejecutar_agente(
+            data.mensaje, data.cliente_id, [m.model_dump() for m in data.historial],
+            notificar=lambda evento, turno: programar_notificacion(tareas, evento, turno),
+        )
+    except Exception as exc:
+        logger.exception("Falló la ejecución del agente")
+        # Se responde aquí (sin lanzar) para que se envíen igual los webhooks de lo ya confirmado (INV-07).
+        return JSONResponse(status_code=503, background=tareas, content={
+            "error": "AGENT_UNAVAILABLE",
+            "detalle": f"El servicio del asistente no respondió ({type(exc).__name__}). "
+                       "Revisá la tabla de turnos antes de reintentar.",
+        })
     return ChatOut(**salida)
+
+
+async def procesar_webhook_externo(mensaje: str) -> None:
+    """Corre el agente fuera del pedido HTTP (en un hilo) y después envía las notificaciones pendientes."""
+    pendientes: list[tuple[str, dict]] = []
+    try:
+        # El primer import de `agent` tarda varios segundos: en un hilo, para no congelar el event loop.
+        agent = await asyncio.to_thread(importlib.import_module, "agent")  # carga .env
+
+        if not os.environ.get("ANTHROPIC_API_KEY"):
+            logger.error("Webhook entrante sin procesar: falta ANTHROPIC_API_KEY.")
+            await asyncio.to_thread(registrar_auditoria, inicio=utcnow(), origen="webhook_externo", prompt=mensaje,
+                                    herramientas=[], pasos=0, latencia_ms=0, estado="error")
+            return
+        await asyncio.to_thread(
+            agent.ejecutar_agente, mensaje, origen="webhook_externo",
+            notificar=lambda evento, turno: pendientes.append((evento, turno)),
+        )
+    except Exception:
+        logger.exception("Falló el agente al procesar un webhook entrante")
+    finally:
+        await asyncio.gather(*(webhooks.enviar_notificacion_webhook(e, t) for e, t in pendientes))
+
+
+@app.post(
+    "/api/webhooks/externo",
+    response_model=WebhookAceptadoOut,
+    status_code=202,
+    tags=["Agente"],
+    summary="Recibir un mensaje de un canal externo",
+    responses={422: {"model": ErrorOut, "description": "`INVALID_REQUEST`: cuerpo mal formado o campos vacíos."}},
+)
+def webhook_externo(data: WebhookExternoIn, tareas: BackgroundTasks) -> WebhookAceptadoOut:
+    """Responde `202` de inmediato y procesa el mensaje con el agente en segundo plano. El resultado queda en
+    `audit_logs`; la respuesta del agente no se envía al remitente (spec §16.5)."""
+    tareas.add_task(procesar_webhook_externo, data.mensaje)
+    return WebhookAceptadoOut()
+
+
+@app.get("/api/audit-logs", response_model=list[AuditLogOut], tags=["Agente"], summary="Últimas ejecuciones del agente")
+def listar_audit_logs() -> list[AuditLogOut]:
+    """Las últimas 20 filas de `audit_logs`, de la más reciente a la más antigua (INV-09)."""
+    with read_conn() as conn:
+        filas = conn.execute("SELECT * FROM audit_logs ORDER BY timestamp DESC, rowid DESC LIMIT 20").fetchall()
+    return [AuditLogOut(**{**dict(f), "herramientas": json.loads(f["herramientas"])}) for f in filas]
 
 
 @app.post(

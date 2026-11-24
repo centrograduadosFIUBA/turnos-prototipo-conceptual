@@ -5,7 +5,9 @@ pydantic>=2.0
 
 # Tests automatizados (Clase 5)
 pytest>=8.0
-httpx>=0.27   # requerido por fastapi.testclient.TestClient
+
+# Webhooks (Clase 7, INV-07). También lo requiere fastapi.testclient.TestClient
+httpx>=0.27   # cliente HTTP asíncrono con timeout
 
 # Agente asistente y base de conocimiento (Clase 6)
 anthropic>=2.10    # SDK de Claude: motor del agente (agent.py)
