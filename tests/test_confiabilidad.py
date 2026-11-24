@@ -49,6 +49,48 @@ def pedido_reserva(delta=timedelta(days=1), id_="t1"):
     return respuesta(uso("reservar_turno", {"paciente": "c1", "servicio_id": "s1", "fecha_hora": iso(proximo_slot(delta))}, id_))
 
 
+# --- Escenarios de aceptación (Clase 7) --------------------------------------
+def test_inv07_dos_503_y_un_200_son_3_intentos_y_el_turno_queda_guardado(client, receptor):
+    receptor.plan = [503, 503, 200]
+    r = reservar(client)
+
+    assert r.status_code == 201
+    assert len(receptor.recibidos) == 3 and receptor.esperas == [1, 2]
+    [turno] = filas("turno")  # directamente en SQLite
+    assert (turno["id"], turno["estado"]) == (r.json()["id"], "CONFIRMADO")
+    [entrega] = filas("webhook_logs")
+    assert (entrega["estado"], entrega["intentos"], entrega["codigo_http"]) == ("entregado", 3, 200)
+
+
+def test_inv08_modelo_que_repite_la_misma_llamada_se_corta_en_la_segunda(client):
+    class ModeloEnBucle(ModeloFalso):
+        def create(self, **kwargs):  # pide siempre lo mismo, sin fin
+            self.pedidos.append(kwargs)
+            return respuesta(uso("consultar_turnos", {"fecha": "2026-11-25"}, f"t{len(self.pedidos)}"))
+
+    modelo = ModeloEnBucle()
+    out = agent.ejecutar_agente("¿qué turnos hay?", client=modelo)
+
+    assert len(modelo.pedidos) == 2  # no hay una tercera llamada al modelo
+    assert len(out["tools_usadas"]) == 1  # la repetida no se ejecuta
+    assert out["respuesta"] == agent.MENSAJE_CIRCUIT_BREAKER
+    [log] = filas("audit_logs")
+    assert (log["estado"], log["pasos"], log["herramientas"]) == ("circuit_breaker", 2, '["consultar_turnos"]')
+
+
+def test_inv09_webhook_entrante_responde_202_y_aparece_en_audit_logs(client, monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "clave-de-prueba")
+    monkeypatch.setattr(agent, "_crear_cliente", lambda: ModeloFalso(texto("Hola")))
+    assert client.get("/api/audit-logs").json() == []
+
+    r = client.post("/api/webhooks/externo",
+                    json={"canal": "whatsapp", "remitente": "+5491100000000", "mensaje": "Hola"})
+
+    assert r.status_code == 202 and r.json() == {"status": "procesando"}
+    [log] = client.get("/api/audit-logs").json()
+    assert (log["origen"], log["prompt"], log["estado"], log["pasos"]) == ("webhook_externo", "Hola", "ok", 1)
+
+
 # --- INV-07 ------------------------------------------------------------------
 def test_reservar_y_cancelar_por_api_notifican(client, receptor):
     turno = reservar(client).json()

@@ -220,7 +220,7 @@ Ejecuta el plan v3 de [plan.md](plan.md) sobre [spec.md](spec.md) v0.4.1.
 
 ## Fase C3 — Verificación
 
-- [x] C3.1 `tests/test_confiabilidad.py`: suite completa en verde (75 tests).
+- [x] C3.1 `tests/test_confiabilidad.py`: suite completa en verde (78 tests).
 - [x] C3.2 Servidor real con receptor que responde 503: 4 intentos y turno confirmado.
 - [x] C3.3 Panel y botón de simulación probados en Chrome (sin API key: la ejecución queda como `error`).
 - [ ] C3.4 Probar el agente con Claude real por chat y por webhook entrante.
