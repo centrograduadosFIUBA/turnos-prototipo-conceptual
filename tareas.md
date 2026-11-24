@@ -198,3 +198,35 @@ F4 y F5 pueden avanzar en paralelo una vez cerrada la Fase 3, porque ambas consu
 - [x] B5.5 Demostración de detección de regresiones: invertir el signo de INV-01 hace fallar los tests de cancelación (revertido).
 
 **Hecho cuando:** `python -m pytest` pasa en verde en menos de 2 segundos.
+
+---
+
+# Bloque C — Fase 3 del curso: agentes confiables (Clase 7)
+
+Ejecuta el plan v3 de [plan.md](plan.md) sobre [spec.md](spec.md) v0.4.1.
+
+## Fase C1 — Especificación
+
+- [x] C1.1 §16 con INV-07, INV-08 e INV-09; tablas `audit_logs` y `webhook_logs`; contrato de los endpoints nuevos.
+
+## Fase C2 — Implementación
+
+- [x] C2.1 `webhooks.py`: timeout de 3 s, reintentos a 1, 2 y 4 s, resultado en `webhook_logs` (INV-07).
+- [x] C2.2 `BackgroundTasks` en reserva, cancelación y operaciones del agente (INV-07).
+- [x] C2.3 Detector de llamadas repetidas y respuesta de respaldo (INV-08).
+- [x] C2.4 Registro en `audit_logs`, también ante fallos (INV-09).
+- [x] C2.5 `POST /api/webhooks/externo` y `GET /api/audit-logs`.
+- [x] C2.6 Panel "Monitor de Auditoría & Webhooks" en `prototipo-turnos.html`.
+
+## Fase C3 — Verificación
+
+- [x] C3.1 `tests/test_confiabilidad.py`: suite completa en verde (75 tests).
+- [x] C3.2 Servidor real con receptor que responde 503: 4 intentos y turno confirmado.
+- [x] C3.3 Panel y botón de simulación probados en Chrome (sin API key: la ejecución queda como `error`).
+- [ ] C3.4 Probar el agente con Claude real por chat y por webhook entrante.
+- [ ] C3.5 Probar contra un receptor externo real (`WEBHOOK_NOTIFY_URL` propia).
+
+## Pendiente fuera de esta fase
+
+- [ ] Autenticación del webhook entrante y de `/api/audit-logs` (D-13, D-14).
+- [ ] Firma del webhook saliente (D-12).

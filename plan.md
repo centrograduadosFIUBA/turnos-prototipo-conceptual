@@ -90,6 +90,37 @@ Separar la presentación (Capa 1) de las reglas (Capa 2) y del almacenamiento (C
 
 ---
 
+# Plan v3 — Fase 3: agentes confiables (Clase 7)
+
+Base normativa: [spec.md](spec.md) v0.4.1 (INV-07 a INV-09, §16). Complementa al plan v2. El agente y la base de conocimiento (spec §15) son de la Clase 6.
+
+> El backend se levanta en el puerto **8001**; las menciones a 8000 del plan v2 quedaron desactualizadas.
+
+## Componentes
+
+| Componente | Responsabilidad | Regla |
+|---|---|---|
+| `webhooks.py` | `POST` saliente con timeout y reintentos; guarda el resultado en `webhook_logs` | INV-07 |
+| `agent.py` | Corte ante llamadas repetidas y máximo de 5 iteraciones; registra cada ejecución | INV-08, INV-09 |
+| `main.py` | `BackgroundTasks`, tablas `audit_logs` y `webhook_logs`, `POST /api/webhooks/externo`, `GET /api/audit-logs` | INV-07, INV-09 |
+| `prototipo-turnos.html` | Panel de monitor y simulación de mensaje entrante | §16.5 |
+
+## Decisiones de diseño
+
+- La notificación se programa después del `COMMIT`: un receptor caído no afecta a la transacción.
+- El agente avisa cada operación confirmada con `notificar(evento, turno)`, así las reservas hechas por chat o por webhook también notifican.
+- `/api/chat` devuelve el `503` sin lanzar excepción, para no perder las notificaciones pendientes.
+- El primer `import agent` tarda varios segundos: en el webhook entrante se hace en un hilo para no congelar el servidor.
+
+## Riesgos y puntos abiertos
+
+- Los endpoints no tienen autenticación (spec D-13, D-14): uso solo local.
+- Entrega de webhooks de mejor esfuerzo: lo pendiente se pierde si el proceso se reinicia.
+- La respuesta del agente a un webhook entrante no se envía al remitente.
+- El webhook saliente no está firmado (D-12).
+
+---
+
 # Anexo A — Plan v1 (Fase 1, prototipo en memoria)
 
 > Se conserva sin cambios de fondo como historial. Describe `index.html`.

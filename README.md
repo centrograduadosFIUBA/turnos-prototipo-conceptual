@@ -1,6 +1,8 @@
 # Turnos Pro — Gestión de turnos y reservas de servicios profesionales
 
-Este proyecto forma parte del curso **"Creá tu proyecto con Inteligencia Artificial"**. Es el resultado de las **3 primeras clases, que conforman la FASE 1** del curso: pasar de una idea a un prototipo funcional trabajando con la metodología **Spec-Driven Development (SDD)**, donde primero se escribe una especificación formal y recién después se genera el código.
+Este proyecto forma parte del curso **"Creá tu proyecto con Inteligencia Artificial"**. Se construye con la metodología **Spec-Driven Development (SDD)**: primero se escribe una especificación formal y recién después se genera el código. Las 3 primeras clases (**Fase 1**) llevaron la idea a un prototipo funcional; las siguientes agregaron un backend con base de datos (Fase 2) y un agente asistente con garantías de confiabilidad (Fase 3).
+
+Hay dos versiones de la aplicación: `index.html` (prototipo de la Fase 1, datos en memoria) y `prototipo-turnos.html` (conectada al backend).
 
 - **Prototipo en línea:** https://claude.ai/artifact/JUv3cgvTQv1i2vxf3DK5z2 
 - **Prototipo local:** abrí [index.html](index.html) con doble clic. Necesita internet, porque React y Tailwind se cargan desde CDN.
@@ -14,7 +16,7 @@ git clone https://github.com/centrograduadosFIUBA/turnos-prototipo-conceptual.gi
 cd turnos-prototipo-conceptual
 ```
 
-Después, abrí `index.html` en el navegador. No hace falta instalar dependencias ni compilar el proyecto.
+Para ver el prototipo de la Fase 1, abrí `index.html` en el navegador: no necesita instalar nada. Para la aplicación completa, seguí los pasos del backend.
 
 ## Cómo hacer un fork y clonarlo
 
@@ -108,7 +110,7 @@ Los tests no usan la red ni la API de Anthropic: el modelo y el receptor de webh
 
 ## Qué es
 
-Una aplicación web para reservar turnos con profesionales. Tiene dos vistas sobre los mismos datos en memoria:
+Una aplicación web para reservar turnos con profesionales. Tiene dos vistas sobre los mismos datos (en memoria en `index.html`; en SQLite en `prototipo-turnos.html`):
 
 - **Vista Cliente:** elegir servicio, ver horarios libres, reservar, confirmar y cancelar turnos propios.
 - **Vista Administrador:** agenda, métricas, bloqueos de horarios, servicios, auditoría y acciones sobre los turnos.
@@ -123,7 +125,14 @@ Las reglas del negocio (sin doble reserva, cancelación hasta 2 horas antes, dat
 | [historias-de-usuario.md](historias-de-usuario.md) | 7 historias de los dos flujos principales, con criterios en Gherkin y casos borde |
 | [plan.md](plan.md) | Plan para convertir la especificación en un prototipo interactivo |
 | [tareas.md](tareas.md) | Tareas organizadas en 9 fases para ejecutar el plan |
-| [index.html](index.html) | La aplicación completa en un solo archivo (dominio, estado, vistas y datos de ejemplo) |
+| [index.html](index.html) | Prototipo de la Fase 1 en un solo archivo (dominio, estado, vistas y datos de ejemplo) |
+| [prototipo-turnos.html](prototipo-turnos.html) | Interfaz conectada al backend, con asistente y monitor de auditoría |
+| [main.py](main.py) | API FastAPI, persistencia en SQLite y reglas del negocio |
+| [agent.py](agent.py) | Agente asistente con herramientas sobre la lógica real |
+| [webhooks.py](webhooks.py) | Notificaciones salientes con reintentos |
+| [ingestar_conocimiento.py](ingestar_conocimiento.py) | Base de conocimiento vectorial (ChromaDB) |
+| [seed_demo.py](seed_demo.py) | Carga turnos de ejemplo |
+| [tests/](tests/) | Suite automatizada (pytest) |
 | [guia-de-uso.md](guia-de-uso.md) | Funcionalidades y guía paso a paso de pruebas en la interfaz |
 
 ## Cómo se construyó: paso a paso
@@ -253,7 +262,7 @@ Genera un readme explicando que este codigo forma parte del curso "Creá tu proy
 4. **Un prototipo se verifica contra el spec**, no contra la intuición. Cada regla tiene un escenario de prueba asociado.
 5. **Revisar lo que produce la IA importa.** Al derivar las historias se detectaron huecos del spec, y al probar el código se corrigieron detalles.
 
-## Cómo probarlo
+## Cómo probar el prototipo de la Fase 1
 
 Abrí [index.html](index.html) y seguí [guia-de-uso.md](guia-de-uso.md). Tres pruebas para empezar:
 
@@ -261,7 +270,7 @@ Abrí [index.html](index.html) y seguí [guia-de-uso.md](guia-de-uso.md). Tres p
 2. **Regla de las 2 horas:** pulsá `+1 min` en el reloj simulado y probá cancelar el turno de las 09:30. Con **Modo auditoría** activado, el dominio lo rechaza con `CANCELLATION_WINDOW_EXPIRED`.
 3. **Doble reserva:** en el modal de reserva, activá la simulación de otro cliente en el mismo instante. Queda un solo turno.
 
-## Límites conocidos
+## Límites conocidos del prototipo de la Fase 1
 
 - No hay persistencia: al recargar, los datos vuelven al estado inicial.
 - No hay inicio de sesión real; el rol se elige con un selector para poder auditar permisos.
@@ -271,7 +280,10 @@ Abrí [index.html](index.html) y seguí [guia-de-uso.md](guia-de-uso.md). Tres p
 
 ## Tecnologías
 
-HTML, React 18 y Tailwind CSS cargados por CDN, con íconos de Lucide incluidos en el mismo archivo. No hay compilación ni dependencias locales.
+- **Interfaz:** HTML, React 18 y Tailwind CSS cargados por CDN, con íconos incluidos en el mismo archivo. No hay compilación.
+- **Backend:** Python, FastAPI, SQLite y httpx.
+- **Agente:** SDK de Anthropic y ChromaDB.
+- **Tests:** pytest (Node.js para las pruebas de integración del frontend).
 
 ---
 

@@ -438,9 +438,9 @@ Alcance: el `PROFESIONAL` ve solo las suyas; el `ADMIN` ve las globales y por pr
 | INV-04 | — | Criterios 12, 13 (§15.4) |
 | INV-05 | — | Criterios 14, 15 (§15.4) |
 | INV-06 | — | Criterios 16, 17, 18 (§15.4) |
-| INV-07 | — | Criterios 19, 20, 21 (§16.4) |
-| INV-08 | — | Criterios 22, 23 (§16.4) |
-| INV-09 | — | Criterios 24, 25 (§16.4) |
+| INV-07 | `webhooks.py`; `main.programar_notificacion`, `main.procesar_webhook_externo` | Criterios 19, 20, 21 (§16.4) |
+| INV-08 | `agent.ejecutar_agente` | Criterios 22, 23 (§16.4) |
+| INV-09 | `main.registrar_auditoria`; `agent.ejecutar_agente`; `GET /api/audit-logs` | Criterios 24, 25 (§16.4) |
 
 ---
 
