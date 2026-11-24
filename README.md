@@ -237,4 +237,4 @@ HTML, React 18 y Tailwind CSS cargados por CDN, con íconos de Lucide incluidos 
 
 ---
 
-Última actualización: 27 de octubre de 2026.
+Última actualización: 24/11/2026.
