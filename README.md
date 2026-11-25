@@ -61,10 +61,10 @@ Requiere **Python 3.9 o superior**. Todos los comandos se ejecutan desde la carp
 3. Levantá el servidor (la base `turnos.db` se crea sola al iniciar):
 
    ```bash
-   uvicorn main:app --reload --port 8001
+   uvicorn main:app --reload --port 8000
    ```
 
-4. Probá la API en Swagger UI: http://localhost:8001/docs
+4. Probá la API en Swagger UI: http://localhost:8000/docs
 5. (Opcional) Cargá turnos de ejemplo: `python seed_demo.py --reset`
 6. Abrí `prototipo-turnos.html` en el navegador. Con el servidor corriendo, los turnos se leen y se guardan en SQLite.
 
@@ -84,6 +84,8 @@ El asistente de turnos (`agent.py`) suma tres garantías, definidas en la §16 d
 
 Copiá `.env_ejm` como `.env` y completá los valores. `.env` no se sube al repositorio.
 
+Los cambios en `WEBHOOK_NOTIFY_URL` se aplican en el envío siguiente, sin reiniciar el servidor: el archivo `.env` manda sobre las variables de entorno. Las demás variables sí requieren reiniciar.
+
 | Variable | Uso |
 |---|---|
 | `ANTHROPIC_API_KEY` | Necesaria para el asistente. |
@@ -96,7 +98,7 @@ Copiá `.env_ejm` como `.env` y completá los valores. `.env` no se sube al repo
 | `POST /api/webhooks/externo` | Recibe `{"canal": "whatsapp", "remitente": "...", "mensaje": "..."}`, responde `202` y procesa el mensaje en segundo plano. La respuesta del agente no se envía al remitente. |
 | `GET /api/audit-logs` | Últimas 20 ejecuciones del agente. |
 
-En la interfaz (http://localhost:8001/), abrí el panel **🛡️ Monitor de Auditoría & Webhooks** y usá **Simular Mensaje Entrante (Webhook)** para probar el flujo.
+En la interfaz (http://localhost:8000/), abrí el panel **🛡️ Monitor de Auditoría & Webhooks** y usá **Simular Mensaje Entrante (Webhook)** para probar el flujo.
 
 > **Solo para uso local.** Estos endpoints no tienen autenticación: quien llegue al servidor puede ejecutar el agente (con costo), reservar a nombre de un paciente y leer los mensajes auditados.
 

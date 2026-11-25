@@ -3,7 +3,9 @@
 Se ejecuta en segundo plano, después del COMMIT: nada de lo que pase aquí afecta a la transacción del turno
 ni a la respuesta al cliente. La entrega es de mejor esfuerzo (sin cola persistente).
 
-Configuración: `WEBHOOK_NOTIFY_URL` en `.env` o en el entorno; vacía = webhooks desactivados.
+Configuración: `WEBHOOK_NOTIFY_URL`; vacía = webhooks desactivados. El archivo `.env` se relee en cada envío
+y manda sobre las variables de entorno (una terminal puede conservar un valor viejo). Sin `.env`, se usa el
+entorno. `WEBHOOK_ENV_FILE` permite indicar otro archivo (lo usan los tests).
 La URL nunca se imprime ni se guarda, porque puede contener un token.
 """
 from __future__ import annotations
@@ -12,10 +14,11 @@ import asyncio
 import logging
 import os
 import uuid
+from pathlib import Path
 from typing import Optional
 
 import httpx
-from dotenv import load_dotenv
+from dotenv import dotenv_values
 
 TIMEOUT_SEGUNDOS = 3.0
 ESPERAS = (1, 2, 4)  # segundos antes de cada reintento: 1 intento original + 3 reintentos
@@ -26,6 +29,17 @@ if not logger.handlers:  # uvicorn no muestra los INFO de otros loggers: salida 
     _consola.setFormatter(logging.Formatter("%(levelname)s:     [webhook] %(message)s"))
     logger.addHandler(_consola)
     logger.setLevel(logging.INFO)
+
+
+def _url_configurada() -> str:
+    """Destino vigente. Si existe el archivo `.env`, es la única fuente: quitar la línea desactiva los webhooks."""
+    archivo = Path(os.environ.get("WEBHOOK_ENV_FILE") or Path(__file__).with_name(".env"))
+    try:
+        if archivo.is_file():
+            return (dotenv_values(archivo, encoding="utf-8-sig").get("WEBHOOK_NOTIFY_URL") or "").strip()
+    except (OSError, UnicodeDecodeError):
+        logger.exception("No se pudo leer %s; se usa la variable de entorno.", archivo.name)
+    return os.environ.get("WEBHOOK_NOTIFY_URL", "").strip()
 
 
 def _crear_cliente() -> httpx.AsyncClient:
@@ -50,8 +64,7 @@ async def enviar_notificacion_webhook(evento: str, payload: dict) -> None:
     Reintenta (esperas de 1, 2 y 4 s) ante error de red, timeout o status >= 500. Cualquier otro status
     distinto de 2xx es un fallo definitivo. El resultado final se guarda en `webhook_logs`.
     """
-    load_dotenv()  # no pisa variables ya definidas en el entorno
-    url = os.environ.get("WEBHOOK_NOTIFY_URL", "").strip()
+    url = _url_configurada()
     turno_id = payload.get("id")
     if not url:
         logger.info("WEBHOOK_NOTIFY_URL vacía: no se envía %s (turno %s).", evento, turno_id)

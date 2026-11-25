@@ -134,6 +134,21 @@ def test_sin_url_no_envia_ni_guarda(client, receptor, monkeypatch):
     assert receptor.recibidos == [] and filas("webhook_logs") == []
 
 
+def test_el_archivo_env_manda_sobre_el_entorno_y_se_relee_en_cada_envio(client, receptor, monkeypatch, tmp_path):
+    archivo = tmp_path / ".env"
+    monkeypatch.setenv("WEBHOOK_ENV_FILE", str(archivo))
+    monkeypatch.setenv("WEBHOOK_NOTIFY_URL", "http://valor-viejo.test/hook")  # como el que deja una terminal
+
+    archivo.write_text(f"WEBHOOK_NOTIFY_URL={URL}\n", encoding="utf-8")
+    assert webhooks._url_configurada() == URL
+    archivo.write_text("WEBHOOK_NOTIFY_URL=http://otro.test/hook\n", encoding="utf-8")
+    assert webhooks._url_configurada() == "http://otro.test/hook"
+
+    archivo.write_text("# WEBHOOK_NOTIFY_URL=http://otro.test/hook\n", encoding="utf-8")
+    assert reservar(client).status_code == 201
+    assert receptor.recibidos == []  # línea comentada = desactivado, aunque el entorno tenga un valor
+
+
 def test_una_reserva_rechazada_no_notifica(client, receptor):
     reservar(client)
     assert reservar(client).status_code == 409

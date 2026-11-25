@@ -21,7 +21,7 @@ Organización del archivo:
     6. Reglas de dominio funciones que operan sobre la conexión de la transacción
     7. API               aplicación FastAPI y endpoints
 
-Levantar:  uvicorn main:app --reload --port 8001      Swagger UI: http://localhost:8001/docs
+Levantar:  uvicorn main:app --reload --port 8000      Swagger UI: http://localhost:8000/docs
 Probar:    python -m pytest
 """
 from __future__ import annotations

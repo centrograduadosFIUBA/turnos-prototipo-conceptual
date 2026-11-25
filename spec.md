@@ -2,7 +2,7 @@
 
 | Campo | Valor |
 |---|---|
-| Versión | 0.4.1 (Fase 3, cierre: agentes confiables) |
+| Versión | 0.4.2 (Fase 3, cierre: agentes confiables) |
 | Estado | Borrador para revisión |
 | Metodología | Spec-Driven Development (SDD) |
 | Fecha | 2026-11-24 |
@@ -511,6 +511,7 @@ La validación y la inserción ocurren en una única transacción (INV-03).
 | Versión | Fecha | Cambios |
 |---|---|---|
 | 0.1.0 | 2026-10-26 | Versión inicial del MVP. |
+| 0.4.2 | 2026-11-24 | §16.3: el archivo `.env` se relee en cada envío y manda sobre el entorno para `WEBHOOK_NOTIFY_URL`. |
 | 0.4.1 | 2026-11-24 | INV-07: se reintenta solo ante red, timeout o `5xx`; tabla `webhook_logs`. §16.5: contratos de `POST /api/webhooks/externo` y `GET /api/audit-logs`. D-11 resuelta, D-13 parcial, D-14 abierta. §14.2: tests de confiabilidad. |
 | 0.4.0 | 2026-11-24 | Nueva §16 (Módulo de Confiabilidad, Webhooks y Guardrails Operativos) con `INV-07`, `INV-08` e `INV-09`; tabla `audit_logs` (§4.1, §12); decisiones abiertas D-11 a D-13; criterios 19 a 25; filas de trazabilidad en §10. |
 | 0.3.0 | 2026-11-17 | Fase 3: nueva §15 (Módulo Agente Asistente `POST /api/chat` y Base de Conocimiento `POST /api/conocimiento`) con las reglas `INV-04`, `INV-05` e `INV-06`; decisiones D-07 a D-10 (resueltas en la implementación); contrato de los endpoints (§15.1.1); código `AGENT_UNAVAILABLE`; filas de trazabilidad en §10. La numeración de §12 a §14 no se modifica (ver nota en §15). |
@@ -684,6 +685,8 @@ Agrega tres garantías operativas sobre lo ya definido: notificación saliente p
 | Variable | Obligatoria | Default | Uso |
 |---|---|---|---|
 | `WEBHOOK_NOTIFY_URL` | No | vacío (webhooks desactivados) | Destino de las notificaciones de INV-07. |
+
+`WEBHOOK_NOTIFY_URL` DEBE leerse en cada envío, sin reiniciar el servidor. Si existe el archivo `.env`, es la única fuente (una línea ausente o vacía desactiva los webhooks), aunque la variable de entorno tenga otro valor. Sin `.env`, se usa el entorno. `WEBHOOK_ENV_FILE` PUEDE indicar otro archivo.
 
 ### 16.4 Criterios de aceptación (Given/When/Then)
 

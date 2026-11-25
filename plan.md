@@ -94,7 +94,7 @@ Separar la presentación (Capa 1) de las reglas (Capa 2) y del almacenamiento (C
 
 Base normativa: [spec.md](spec.md) v0.4.1 (INV-07 a INV-09, §16). Complementa al plan v2. El agente y la base de conocimiento (spec §15) son de la Clase 6.
 
-> El backend se levanta en el puerto **8001**; las menciones a 8000 del plan v2 quedaron desactualizadas.
+> El backend se levanta en el puerto **8000**, como define el plan v2.
 
 ## Componentes
 
